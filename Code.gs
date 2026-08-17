@@ -2459,11 +2459,27 @@ function updateClientShow(token, payload) {
 
     // Return only HTML-service-safe primitives. Returning Date objects here can make
     // google.script.run fail AFTER the spreadsheet update has already succeeded.
+    // Mirror createClientShow()'s response shape (including Event Time) so any
+    // Overview view that renders from this save response — instead of issuing a
+    // separate getShowWorkspace() call — still receives the persisted Event Time.
     return {
       ok:true,
       message:'Client/show updated successfully.',
       bookingId:bookingId,
-      clientId:clientId
+      clientId:clientId,
+      bookingStatus:String(booking['Booking Status'] || 'Pending'),
+      eventTime:String(booking['Event Time'] || ''),
+      booking:{
+        ID:bookingId,
+        BookingID:bookingId,
+        'Client Name':String(booking['Client Name'] || ''),
+        'Event Type':String(booking['Event Type'] || ''),
+        'Event Name':String(booking['Event Name'] || ''),
+        'Event Date':String(booking['Event Date'] || ''),
+        'Event Time':String(booking['Event Time'] || ''),
+        Location:String(booking.Location || ''),
+        'Booking Status':String(booking['Booking Status'] || 'Pending')
+      }
     };
   } finally {
     lock.releaseLock();
