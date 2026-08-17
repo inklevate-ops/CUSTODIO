@@ -505,7 +505,7 @@ function saveClientWorkspace(token, payload) {
       'Event Type':String(payload.eventType || ''),
       'Event Name':String(payload.eventName || ''),
       'Event Date':String(payload.eventDate || ''),
-      'Event Time':normalizeEventTime_(payload.eventTime),
+      'Event Time':'',
       Location:String(payload.location || ''),
       'Subtotal':subtotal,
       Discount:discount,
@@ -522,9 +522,12 @@ function saveClientWorkspace(token, payload) {
       'Updated Date':now
     };
 
+    const eventTimeText = normalizeEventTime_(payload.eventTime);
     // If an older installation has a different booking header, upsertRow_ only writes known headers.
     upsertRow_('Bookings', booking);
-    setBookingEventTimeText_(bookingId, booking['Event Time']);
+    SpreadsheetApp.flush();
+    setBookingEventTimeText_(bookingId, eventTimeText);
+    booking['Event Time'] = getPersistedBookingEventTime_(bookingId) || eventTimeText;
     recalculateCrewPayForBooking_(bookingId);
 
     // Booking items: replace linked items on save to avoid duplicate rows.
@@ -837,7 +840,7 @@ function createClientShow(token, payload) {
       'Event Type':String(payload.eventType || 'Other'),
       'Event Name':String(payload.eventName || ''),
       'Event Date':String(payload.eventDate || ''),
-      'Event Time':normalizeEventTime_(payload.eventTime),
+      'Event Time':'',
       Location:String(payload.location || ''),
       Subtotal:0,
       'Discount Type':'Fixed',
@@ -857,18 +860,38 @@ function createClientShow(token, payload) {
       'Updated Date':now
     };
 
+    const eventTimeText = normalizeEventTime_(payload.eventTime || payload.event_time || '');
+
     upsertRow_('Clients', client);
     upsertRow_('Bookings', booking);
-    setBookingEventTimeText_(bookingId, payload.eventTime);
-    booking['Event Time'] = getPersistedBookingEventTime_(bookingId) || normalizeEventTime_(payload.eventTime || payload.event_time || '');
+    SpreadsheetApp.flush();
+    setBookingEventTimeText_(bookingId, eventTimeText);
+    booking['Event Time'] = getPersistedBookingEventTime_(bookingId) || eventTimeText;
     recalculateCrewPayForBooking_(bookingId);
 
-    audit_(auth.user, 'CREATE', 'Client / Show', bookingId, {
-      clientId:clientId,
-      clientName:clientName
-    });
+    try {
+      audit_(auth.user, 'CREATE', 'Client / Show', bookingId, {
+        clientId:clientId,
+        clientName:clientName
+      });
+    } catch (e) {}
 
-    return {ok:true, client:client, booking:booking};
+    // Return only HTML-service-safe primitives. Returning Date objects here can make
+    // google.script.run fail AFTER the spreadsheet update has already succeeded.
+    return {
+      ok:true,
+      message:'Client/show created successfully.',
+      bookingId:bookingId,
+      clientId:clientId,
+      bookingStatus:String(booking['Booking Status'] || 'Pending'),
+      eventTime:String(booking['Event Time'] || ''),
+      booking:{
+        ID:bookingId,
+        BookingID:bookingId,
+        'Booking Status':String(booking['Booking Status'] || 'Pending'),
+        'Event Time':String(booking['Event Time'] || '')
+      }
+    };
   } finally {
     lock.releaseLock();
   }
@@ -2417,14 +2440,16 @@ function updateClientShow(token, payload) {
     booking['Event Type'] = String(payload.eventType || '');
     booking['Event Name'] = String(payload.eventName || '');
     booking['Event Date'] = String(payload.eventDate || '');
-    booking['Event Time'] = normalizeEventTime_(payload.eventTime);
+    const eventTimeText = normalizeEventTime_(payload.eventTime);
+    booking['Event Time'] = '';
     booking.Location = String(payload.location || '');
     booking['Booking Status'] = String(payload.bookingStatus || booking['Booking Status'] || 'Pending');
     booking.Notes = String(payload.notes || '');
     booking['Updated Date'] = now;
     upsertRow_('Bookings', booking);
-    setBookingEventTimeText_(bookingId, booking['Event Time']);
-    booking['Event Time'] = getPersistedBookingEventTime_(bookingId) || normalizeEventTime_(payload.eventTime || payload.event_time || '');
+    SpreadsheetApp.flush();
+    setBookingEventTimeText_(bookingId, eventTimeText);
+    booking['Event Time'] = getPersistedBookingEventTime_(bookingId) || eventTimeText;
     recalculateCrewPayForBooking_(bookingId);
 
     audit_(auth.user, 'UPDATE', 'Clients', bookingId, {
@@ -3000,6 +3025,8 @@ function setBookingEventTimeText_(bookingId, eventTime) {
 
   // Event Time is stored as 12-hour text (e.g. 11:30 PM) in the existing
   // Event Time column. Do not prepend an apostrophe. Do not add another column.
+  // Clear time-cell validation so Sheets does not reject 12-hour text.
+  try { cell.clearDataValidations(); } catch (e) {}
   cell.setNumberFormat('@');
   cell.setValue(normalized);
 }

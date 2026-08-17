@@ -1600,16 +1600,16 @@
       setButtonLoading(b,false,'Create Client / Show');
       if(!r||!r.ok){showDialogError(r&&r.message||'Unable to create client/show.');return;}
       closeDialog();
-      const status=String(r.booking && r.booking['Booking Status'] || 'Pending');
+      const status=String(r.bookingStatus || (r.booking && r.booking['Booking Status']) || 'Pending');
       toast(status==='Booked' ? 'Client / Show booked successfully.' : 'Client / Show saved as Pending.');
       if(status==='Booked'){
         openModule('Clients');
-        setTimeout(()=>openShowWorkspace(r.booking.ID),250);
+        setTimeout(()=>openShowWorkspace(r.bookingId || (r.booking && r.booking.ID)),250);
       }else{
         openModule('Pending Clients');
       }
     }).withFailureHandler(function(x){
-      setButtonLoading(b,false,'Create Client / Show');showDialogError(x&&x.message||'Unable to create client/show.');
+      setButtonLoading(b,false,'Create Client / Show');showDialogError((x && (x.message || x)) || 'Unable to create client/show.');
     }).createClientShow(state.token,{
       clientName:document.getElementById('wsClientName').value,
       phone:document.getElementById('wsClientPhone').value,
