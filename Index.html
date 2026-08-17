@@ -1250,27 +1250,6 @@
 
     renderShell(module);
     renderModuleUI(module);
-
-    if(module === 'Pending Clients'){
-      setTimeout(function(){ if(typeof loadPendingClients === 'function') loadPendingClients(); },0);
-    }
-
-    if(module === 'Clients'){
-      loadClientShowList();
-    }
-    if(module === 'Products'){
-      setTimeout(function(){ if(typeof loadProducts === 'function') loadProducts(); },0);
-    }
-    if(module === 'Employees'){
-      setTimeout(function(){ if(typeof loadEmployees === 'function') loadEmployees(); },0);
-    }
-    if(module === 'Payroll'){
-      setTimeout(function(){ if(typeof loadPayroll === 'function') loadPayroll(); },0);
-    }
-
-    if(module === 'Pending Clients'){
-      loadPendingClients();
-    }
   }
 
   function renderModuleUI(module){
@@ -1299,20 +1278,22 @@
     };
 
     content.innerHTML=pages[module] || uiGeneric(module);
+    refreshModuleFromSheet_(module);
+  }
 
-    if(module==='Inventory'){
-      renderInventory();
-    }
-
-    if(module==='Clients'){
-      loadClientShowList();
-    }
-    if(module==='Pending Clients'){
-      loadPendingClients();
-    }
-    if(module==='Calendar'){
-      initCalendar();
-    }
+  function refreshModuleFromSheet_(module){
+    if(module==='Clients') loadClientShowList();
+    if(module==='Pending Clients') loadPendingClients();
+    if(module==='Calendar') initCalendar();
+    if(module==='Products' && typeof loadProducts==='function') loadProducts();
+    if(module==='Inventory' && typeof renderInventory==='function') renderInventory();
+    if(module==='Stock In' && typeof renderStockIn==='function') renderStockIn();
+    if(module==='Stock Out' && typeof renderStockOut==='function') renderStockOut();
+    if(module==='Loans' && typeof loadLoans==='function') loadLoans();
+    if(module==='Employees' && typeof loadEmployees==='function') loadEmployees();
+    if(module==='Payroll' && typeof loadPayroll==='function') loadPayroll();
+    if(module==='Payments' && typeof loadPayments==='function') loadPayments();
+    if(module==='Expenses' && typeof loadExpenses==='function') loadExpenses();
   }
 
   function uiHeader(title,subtitle,action=''){
@@ -1363,7 +1344,7 @@
   function loadPendingClients(){
     google.script.run.withSuccessHandler(function(r){
       if(!r||!r.ok){toast(r&&r.message||'Unable to load pending clients.');return;}
-      pendingClientRows=r.clients||[];
+      pendingClientRows=r.bookings || r.clients || [];
       filterPendingClients();
     }).withFailureHandler(function(e){toast(e&&e.message||'Unable to load pending clients.');}).getPendingClients(state.token);
   }
@@ -1665,6 +1646,7 @@
             </button>
             <div class="show-row-actions">
               <button class="table-action" onclick="event.stopPropagation();openEditClientShow('${esc(b.ID||b.BookingID)}')">Edit</button>
+              ${String(b['Booking Status']||'')==='Cancelled'?'':`<button class="table-action" onclick="event.stopPropagation();cancelClientShowUI('${esc(b.ID||b.BookingID)}')">Cancel</button>`}
               <button class="table-action danger-text" onclick="event.stopPropagation();deleteClientShowUI('${esc(b.ID||b.BookingID)}')">Delete</button>
             </div>
           </div>`).join('')}
@@ -1779,6 +1761,7 @@
         }
 
         toast(r.message || 'Client/show deleted.');
+        window.currentShowBooking=null;
 
         if(activeShowId===id){
           activeShowId='';
@@ -1794,6 +1777,30 @@
         toast((err && (err.message || err)) || 'Unable to delete client/show.');
       })
       .deleteClientShow(state.token,id);
+  }
+
+  function cancelClientShowUI(bookingId){
+    const id=String(bookingId||'').trim();
+    if(!id){
+      toast('Client/show ID is missing.');
+      return;
+    }
+    if(!window.confirm('Cancel this client/show? It will stay in Google Sheet as Cancelled.')) return;
+
+    google.script.run
+      .withSuccessHandler(function(r){
+        if(!r || !r.ok){
+          toast(r && r.message || 'Unable to cancel client/show.');
+          return;
+        }
+        toast(r.message || 'Client/show cancelled.');
+        loadClientShowList();
+        if(activeShowId===id) openShowWorkspace(id);
+      })
+      .withFailureHandler(function(err){
+        toast((err && (err.message || err)) || 'Unable to cancel client/show.');
+      })
+      .cancelClientShow(state.token,id);
   }
 
   function openShowWorkspace(bookingId){
@@ -1833,23 +1840,16 @@
       if(!r||!r.ok){box.innerHTML='<div class="error-card">'+esc(r&&r.message||'Unable to load show.')+'</div>';return;}
 
       const b=r.booking||{};
-      // Preserve the Event Time already loaded for this show if the secondary
-      // workspace request returns an empty value. This keeps Overview consistent
-      // with the Edit form and prevents an empty response from replacing a valid time.
-      const existingBooking = window.currentShowBooking || {};
-      const existingEventTime = String(
-        existingBooking['Event Time'] || existingBooking.EventTime || existingBooking.Time || ''
-      ).trim();
-      const serverEventTime = String(
-        r.eventTime || b['Event Time'] || b.EventTime || b.Time || ''
-      ).trim();
-      r.eventTime = serverEventTime || existingEventTime;
-      b['Event Time'] = r.eventTime;
+      const serverEventTime = String(r.eventTime || b['Event Time'] || '').trim();
+      r.eventTime = serverEventTime;
+      b['Event Time'] = serverEventTime;
       window.currentShowBooking=b;
-      const productCost=Number(r.totals?.productCost||0);
-      const materialCost=Number(r.totals?.materialCost||0);
+      const productCost=Number(r.totals?.productCost||0) || (r.usage||[]).filter(u=>String(u['Usage Type'])==='Product').reduce((s,u)=>s+Number(u['Total Cost']||0),0);
+      const materialCost=Number(r.totals?.materialCost||0) || (r.usage||[]).filter(u=>String(u['Usage Type'])==='Material').reduce((s,u)=>s+Number(u['Total Cost']||0),0);
+      const expenseTotal=Number(r.totals?.expenses||0) || (r.expenses||[]).reduce((s,x)=>s+Number(x.Amount||0),0);
+      const crewCost=Number(r.totals?.crewCost||0) || (r.crew||[]).reduce((s,c)=>s+Number(c.Pay||0),0);
       const revenue=Number(b['Final Amount']||b['Total Amount Due']||0);
-      const paid=Number(b['Paid Amount']||b.DownPayment||0);
+      const paid=Number(r.totals?.paid||b['Paid Amount']||b.DownPayment||0);
       const balance=Math.max(0,revenue-paid);
 
       document.getElementById('workspaceStats').innerHTML=`
@@ -1858,8 +1858,8 @@
         ${workspaceStatUI('Amount Paid',money(paid),'')}
         ${workspaceStatUI('Balance',money(balance),'')}
         ${workspaceStatUI('Material Cost',money(materialCost),'')}
-        ${workspaceStatUI('Total Expenses',money(0),'')}
-        ${workspaceStatUI('Profit',money(revenue-productCost-materialCost-(Number(b.Tax||0))),'profit-stat')}
+        ${workspaceStatUI('Total Expenses',money(expenseTotal),'')}
+        ${workspaceStatUI('Profit',money(revenue-productCost-materialCost-expenseTotal-crewCost-(Number(b.Tax||0))),'profit-stat')}
       `;
 
       if(tab==='overview')box.innerHTML=clientOverviewUI(r);
@@ -1891,14 +1891,7 @@
           ['Event Type',b['Event Type']||'—'],
           ['Event Name',b['Event Name']||'—'],
           ['Event Date',formatDate(b['Event Date'])||'—'],
-          ['Event Time',formatTime12(
-            data.eventTime ||
-            b['Event Time'] ||
-            b.EventTime ||
-            b.Time ||
-            (window.currentShowBooking && window.currentShowBooking['Event Time']) ||
-            ''
-          )||'—'],
+          ['Event Time',formatTime12(data.eventTime || b['Event Time'] || '')||'—'],
           ['Booking Status',b['Booking Status']||'—'],
           ['Location',b.Location||'—'],
           ['Notes',b.Notes||data.client?.Notes||'—']
@@ -1938,7 +1931,7 @@
 
         <div class="table-wrap">
           <table class="data-table">
-            <thead><tr><th>${title==='Products'?'Product':'Material'}</th><th>Beginning Stock</th><th>Quantity Used</th><th>Remaining</th><th>Purchase Cost</th><th>Total Cost</th><th>Status</th></tr></thead>
+            <thead><tr><th>${title==='Products'?'Product':'Material'}</th><th>Beginning Stock</th><th>Quantity Used</th><th>Remaining</th><th>Purchase Cost</th><th>Total Cost</th><th>Status</th><th></th></tr></thead>
             <tbody>
               ${usage.length?usage.map(u=>`
                 <tr>
@@ -1949,7 +1942,8 @@
                   <td>${money(u['Purchase Cost'])}</td>
                   <td>${money(u['Total Cost'])}</td>
                   <td><span class="stock-badge ${statusClass(u['Remaining Stock']<=0?'Out of Stock':u['Remaining Stock']<=getItemMinimum(items,u.ItemID)?'Low Stock':'In Stock')}">${u['Remaining Stock']<=0?'Out of Stock':u['Remaining Stock']<=getItemMinimum(items,u.ItemID)?'Low Stock':'In Stock'}</span></td>
-                </tr>`).join(''):`<tr><td colspan="7"><div class="workspace-empty small">No ${title.toLowerCase()} recorded for this show.</div></td></tr>`}
+                  <td><button class="table-action danger-text" type="button" onclick="removeShowUsageUI('${esc(u.ID||u.UsageID)}','${esc(type)}')">Remove</button></td>
+                </tr>`).join(''):`<tr><td colspan="8"><div class="workspace-empty small">No ${title.toLowerCase()} recorded for this show.</div></td></tr>`}
             </tbody>
           </table>
         </div>
@@ -2035,6 +2029,22 @@
     }).withFailureHandler(function(x){
       setButtonLoading(b,false,'Save '+type+' Usage');showDialogError(x&&x.message||'Unable to save usage.');
     })[fn](state.token,payload);
+  }
+
+  function removeShowUsageUI(usageId, type){
+    const id=String(usageId||'').trim();
+    if(!id) return;
+    if(!confirm('Remove this usage from the show? Stock will be restored in Google Sheet.')) return;
+    google.script.run
+      .withSuccessHandler(function(r){
+        if(!r||!r.ok){toast(r&&r.message||'Unable to remove usage.');return;}
+        toast(r.message||'Usage removed.');
+        loadShowUsage(type==='Product'?'products':'materials');
+      })
+      .withFailureHandler(function(err){
+        toast(err&&err.message||'Unable to remove usage.');
+      })
+      .removeShowUsage(state.token,id);
   }
 
   function openQuickMaterialDialog(){
@@ -2282,23 +2292,32 @@
       .deleteBookingCrew(state.token,id);
   }
 
-  function expensesWorkspaceUI(){
+  function expensesWorkspaceUI(data){
+    const expenses = Array.isArray(data.expenses) ? data.expenses : [];
+    const total = expenses.reduce((s,e)=>s+Number(e.Amount||0),0);
     return `<div class="workspace-section-card">
       <div class="section-card-head">
         <div>
           <div class="section-card-title">Expenses</div>
           <div class="section-card-sub">Food, hotel, accommodation, gas, transportation and other.</div>
         </div>
-        <button class="btn gold small" type="button" onclick="toast('Expense form will be connected next.')">+ Expense</button>
+        <button class="btn gold small" type="button" onclick="openShowExpenseDialog()">+ Expense</button>
       </div>
       <div class="expense-chips compact">
         <span>Food</span><span>Hotel</span><span>Accommodation</span><span>Gas</span><span>Transportation</span><span>Other</span>
       </div>
+      <div class="usage-total-row"><span>Total Expenses</span><strong>${money(total)}</strong></div>
       <div class="expense-table">
         <table class="data-table">
-          <thead><tr><th>Category</th><th>Description</th><th>Amount</th><th>Receipt</th></tr></thead>
+          <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th></th></tr></thead>
           <tbody>
-            ${Array.from({length:5},()=>`<tr><td><span class="placeholder-line short"></span></td><td><span class="placeholder-line"></span></td><td><span class="placeholder-line short"></span></td><td><span class="placeholder-line short"></span></td></tr>`).join('')}
+            ${expenses.length ? expenses.map(e=>`<tr>
+              <td>${esc(formatDate(e.Date)||'—')}</td>
+              <td>${esc(e.Category||'—')}</td>
+              <td>${esc(e.Description||'—')}</td>
+              <td>${money(e.Amount)}</td>
+              <td><button class="table-action danger-text" type="button" onclick="deleteShowExpenseUI('${esc(e.ID||e.ExpenseID)}')">Delete</button></td>
+            </tr>`).join('') : `<tr><td colspan="5"><div class="workspace-empty small">No expenses recorded for this show.</div></td></tr>`}
           </tbody>
         </table>
       </div>
@@ -2307,31 +2326,210 @@
 
   function paymentsWorkspaceUI(data){
     const b=data.booking||{};
-    return `<div class="workspace-section-card"><div class="section-card-head"><div><div class="section-card-title">Payments</div><div class="section-card-sub">Milestone payments and booking balance.</div></div><button class="btn gold small">+ Payment</button></div><div class="summary-table"><div><span>Final Amount</span><strong>${money(b['Final Amount']||b['Total Amount Due']||0)}</strong></div><div><span>Amount Paid</span><strong>${money(b['Paid Amount']||b.DownPayment||0)}</strong></div><div><span>Balance</span><strong>${money(b.Balance||0)}</strong></div><div><span>Tax</span><strong>${money(b.Tax||0)}</strong></div></div>${uiTable(['Milestone','Due Date','Amount','Paid','Balance'],4)}</div>`;
+    const payments=Array.isArray(data.payments)?data.payments:[];
+    const paid=payments.reduce((s,p)=>s+Number(p.Amount||0),0) || Number(b['Paid Amount']||b.DownPayment||0);
+    const finalAmount=Number(b['Final Amount']||b['Total Amount Due']||0);
+    return `<div class="workspace-section-card"><div class="section-card-head"><div><div class="section-card-title">Payments</div><div class="section-card-sub">Payments recorded in Google Sheet.</div></div><button class="btn gold small" type="button" onclick="openShowPaymentDialog()">+ Payment</button></div><div class="summary-table"><div><span>Final Amount</span><strong>${money(finalAmount)}</strong></div><div><span>Amount Paid</span><strong>${money(paid)}</strong></div><div><span>Balance</span><strong>${money(b.Balance||Math.max(0,finalAmount-paid))}</strong></div><div><span>Tax</span><strong>${money(b.Tax||0)}</strong></div></div>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Date</th><th>Milestone</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th></tr></thead>
+        <tbody>
+          ${payments.length ? payments.map(p=>`<tr>
+            <td>${esc(formatDate(p['Payment Date']||p.Date)||'—')}</td>
+            <td>${esc(p.Milestone||'Payment')}</td>
+            <td>${money(p.Amount)}</td>
+            <td>${esc(p.Method||'—')}</td>
+            <td>${esc(p.Reference||'—')}</td>
+            <td>${esc(p.Status||'Received')}</td>
+          </tr>`).join('') : `<tr><td colspan="6"><div class="workspace-empty small">No payments recorded for this show.</div></td></tr>`}
+        </tbody>
+      </table></div>
+    </div>`;
   }
 
   function profitWorkspaceUI(data){
     const b=data.booking||{};
     const revenue=Number(b['Final Amount']||b['Total Amount Due']||0);
-    const productCost=Number(data.usage?.filter?.(()=>true)?0:0);
     const materialCost=(data.usage||[]).filter(u=>String(u['Usage Type'])==='Material').reduce((s,u)=>s+Number(u['Total Cost']||0),0);
     const productUsageCost=(data.usage||[]).filter(u=>String(u['Usage Type'])==='Product').reduce((s,u)=>s+Number(u['Total Cost']||0),0);
     const crewCost=(data.crew||[]).reduce((sum,c)=>sum+Number(c.Pay||0),0);
-    const net=revenue-productUsageCost-materialCost-crewCost-Number(b.Tax||0);
+    const expenseTotal=(data.expenses||[]).reduce((sum,e)=>sum+Number(e.Amount||0),0);
+    const net=revenue-productUsageCost-materialCost-crewCost-expenseTotal-Number(b.Tax||0);
 
     return `<div class="workspace-section-card"><div class="section-card-title">Profit</div><div class="profit-breakdown">
       ${profitLineUI('Revenue',revenue)}
       ${profitLineUI('Product Cost',-productUsageCost)}
       ${profitLineUI('Material Cost',-materialCost)}
       ${profitLineUI('Crew Cost',-crewCost)}
-      ${profitLineUI('Expenses',0)}
+      ${profitLineUI('Expenses',-expenseTotal)}
       ${profitLineUI('Tax',-Number(b.Tax||0))}
       <div class="profit-total"><span>Net Profit</span><strong>${money(net)}</strong></div>
-    </div><div class="workspace-placeholder">Crew pay is included automatically. Event expenses will be connected next.</div></div>`;
+    </div></div>`;
   }
 
   function profitLineUI(label,value){
     return `<div class="profit-line"><span>${esc(label)}</span><strong class="${value<0?'negative':''}">${money(value)}</strong></div>`;
+  }
+
+  function openShowPaymentDialog(){
+    if(!activeShowId){toast('Select a client/show first.');return;}
+    openPaymentDialog(activeShowId);
+  }
+
+  function openShowExpenseDialog(existing){
+    if(!activeShowId && !(existing&&existing.BookingID)){toast('Select a client/show first.');return;}
+    openExpenseDialog(Object.assign({bookingId:activeShowId}, existing||{}));
+  }
+
+  function deleteShowExpenseUI(expenseId){
+    const id=String(expenseId||'').trim();
+    if(!id) return;
+    if(!confirm('Delete this expense from Google Sheet?')) return;
+    google.script.run
+      .withSuccessHandler(function(r){
+        if(!r||!r.ok){toast(r&&r.message||'Unable to delete expense.');return;}
+        toast(r.message||'Expense deleted.');
+        if(activeShowId) loadShowUsage('expenses');
+        if(typeof loadExpenses==='function' && document.getElementById('expensesPanel')) loadExpenses();
+      })
+      .withFailureHandler(function(err){
+        toast(err&&err.message||'Unable to delete expense.');
+      })
+      .deleteExpense(state.token,id);
+  }
+
+  function openPaymentDialog(preselectedBookingId){
+    google.script.run
+      .withSuccessHandler(function(r){
+        if(!r||!r.ok){toast(r&&r.message||'Unable to load bookings.');return;}
+        const bookings=r.bookings||[];
+        const selected=String(preselectedBookingId||'');
+        showDialog(`
+          <div class="dialog-card">
+            <div class="dialog-head"><div><div class="dialog-title">Add Payment</div><div class="dialog-subtitle">This writes a Payments row and updates the booking balance in Google Sheet.</div></div><button class="dialog-close" onclick="closeDialog()">×</button></div>
+            <form onsubmit="submitPayment(event)">
+              <div class="form-grid">
+                <label>Client / Show<select id="payBookingId" required>
+                  <option value="">Select booking</option>
+                  ${bookings.map(b=>`<option value="${esc(b.ID||b.BookingID)}" ${String(b.ID||b.BookingID)===selected?'selected':''}>${esc(b['Client Name']||'')} · ${esc(b['Event Name']||b['Event Type']||'')} · ${esc(formatDate(b['Event Date']))}</option>`).join('')}
+                </select></label>
+                <label>Amount<input id="payAmount" type="number" min="0.01" step="0.01" required></label>
+                <label>Payment Date<input id="payDate" type="date"></label>
+                <label>Milestone<input id="payMilestone" placeholder="Down payment / Balance"></label>
+                <label>Method<select id="payMethod"><option>Cash</option><option>GCash</option><option>Bank</option><option>Check</option></select></label>
+                <label>Reference<input id="payReference"></label>
+              </div>
+              <div class="dialog-actions"><span></span><button type="button" class="btn" onclick="closeDialog()">Cancel</button><button id="savePaymentBtn" class="btn gold" type="submit">Save Payment</button></div>
+            </form>
+          </div>
+        `);
+      })
+      .withFailureHandler(function(err){toast(err&&err.message||'Unable to load bookings.');})
+      .getBookings(state.token);
+  }
+
+  function submitPayment(e){
+    e.preventDefault();
+    const btn=document.getElementById('savePaymentBtn');
+    setButtonLoading(btn,true,'Saving...');
+    const bookingId=document.getElementById('payBookingId').value;
+    google.script.run
+      .withSuccessHandler(function(r){
+        setButtonLoading(btn,false,'Save Payment');
+        if(!r||!r.ok){showDialogError(r&&r.message||'Unable to save payment.');return;}
+        closeDialog();
+        toast(r.message||'Payment recorded.');
+        if(typeof loadPayments==='function' && document.getElementById('paymentsPanel')) loadPayments();
+        if(activeShowId && String(activeShowId)===String(bookingId||r.bookingId||'')) loadShowUsage('payments');
+        else if(activeShowId) loadShowUsage('payments');
+        loadClientShowList();
+      })
+      .withFailureHandler(function(err){
+        setButtonLoading(btn,false,'Save Payment');
+        showDialogError(err&&err.message||'Unable to save payment.');
+      })
+      .saveBookingPayment(state.token,{
+        bookingId:bookingId,
+        amount:document.getElementById('payAmount').value,
+        date:document.getElementById('payDate').value,
+        milestone:document.getElementById('payMilestone').value,
+        method:document.getElementById('payMethod').value,
+        reference:document.getElementById('payReference').value
+      });
+  }
+
+  function openExpenseDialog(existing){
+    existing=existing||{};
+    const selected=String(existing.bookingId||existing.BookingID||'');
+    google.script.run
+      .withSuccessHandler(function(r){
+        const bookings=(r&&r.ok)?(r.bookings||[]):[];
+        showDialog(`
+          <div class="dialog-card">
+            <div class="dialog-head"><div><div class="dialog-title">${existing.ID?'Edit Expense':'Add Expense'}</div><div class="dialog-subtitle">This writes the Expenses sheet in Google Sheet.</div></div><button class="dialog-close" onclick="closeDialog()">×</button></div>
+            <form onsubmit="submitExpense(event,'${esc(existing.ID||existing.ExpenseID||'')}')">
+              <div class="form-grid">
+                <label>Client / Show<select id="expBookingId">
+                  <option value="">No booking</option>
+                  ${bookings.map(b=>`<option value="${esc(b.ID||b.BookingID)}" ${String(b.ID||b.BookingID)===selected?'selected':''}>${esc(b['Client Name']||'')} · ${esc(b['Event Name']||b['Event Type']||'')}</option>`).join('')}
+                </select></label>
+                <label>Category<select id="expCategory" required>
+                  ${['Food','Hotel','Accommodation','Gas','Transportation','Other'].map(c=>`<option ${String(existing.Category||'')===c?'selected':''}>${c}</option>`).join('')}
+                </select></label>
+                <label>Amount<input id="expAmount" type="number" min="0.01" step="0.01" required value="${esc(existing.Amount||'')}"></label>
+                <label>Date<input id="expDate" type="date" value="${esc(existing.Date||'')}"></label>
+                <label class="full-width">Description<input id="expDescription" value="${esc(existing.Description||'')}"></label>
+              </div>
+              <div class="dialog-actions"><span></span><button type="button" class="btn" onclick="closeDialog()">Cancel</button><button id="saveExpenseBtn" class="btn gold" type="submit">Save Expense</button></div>
+            </form>
+          </div>
+        `);
+      })
+      .withFailureHandler(function(){
+        showDialog(`
+          <div class="dialog-card">
+            <div class="dialog-head"><div><div class="dialog-title">Add Expense</div></div><button class="dialog-close" onclick="closeDialog()">×</button></div>
+            <form onsubmit="submitExpense(event,'')">
+              <div class="form-grid">
+                <label>Category<select id="expCategory" required><option>Food</option><option>Hotel</option><option>Accommodation</option><option>Gas</option><option>Transportation</option><option>Other</option></select></label>
+                <label>Amount<input id="expAmount" type="number" min="0.01" step="0.01" required></label>
+                <label>Date<input id="expDate" type="date"></label>
+                <input type="hidden" id="expBookingId" value="${esc(selected)}">
+                <label class="full-width">Description<input id="expDescription"></label>
+              </div>
+              <div class="dialog-actions"><span></span><button type="button" class="btn" onclick="closeDialog()">Cancel</button><button id="saveExpenseBtn" class="btn gold" type="submit">Save Expense</button></div>
+            </form>
+          </div>
+        `);
+      })
+      .getBookings(state.token);
+  }
+
+  function submitExpense(e, expenseId){
+    e.preventDefault();
+    const btn=document.getElementById('saveExpenseBtn');
+    setButtonLoading(btn,true,'Saving...');
+    const bookingId=document.getElementById('expBookingId')?.value||'';
+    google.script.run
+      .withSuccessHandler(function(r){
+        setButtonLoading(btn,false,'Save Expense');
+        if(!r||!r.ok){showDialogError(r&&r.message||'Unable to save expense.');return;}
+        closeDialog();
+        toast(r.message||'Expense saved.');
+        if(typeof loadExpenses==='function' && document.getElementById('expensesPanel')) loadExpenses();
+        if(activeShowId) loadShowUsage('expenses');
+      })
+      .withFailureHandler(function(err){
+        setButtonLoading(btn,false,'Save Expense');
+        showDialogError(err&&err.message||'Unable to save expense.');
+      })
+      .saveExpense(state.token,{
+        id:expenseId||'',
+        bookingId:bookingId,
+        category:document.getElementById('expCategory').value,
+        amount:document.getElementById('expAmount').value,
+        date:document.getElementById('expDate').value,
+        description:document.getElementById('expDescription').value
+      });
   }
 
 
@@ -2732,9 +2930,9 @@
   }
 
   function uiLoans(){
-    return uiHeader('Loans','Track who the money came from, paid amount and balance','<button class="btn gold">+ Loan</button>')+
-      `<div class="stat-strip">${uiStat('Total Loans','₱0.00')}${uiStat('Total Paid','₱0.00')}${uiStat('Outstanding','₱0.00')}</div>`+
-      uiTable(['Borrowed From','Loan Amount','Paid','Outstanding','Date Borrowed','Due Date','Purpose','Action'],5);
+    return uiHeader('Loans','Track who the money came from, paid amount and balance','<button class="btn gold" type="button" onclick="openLoanForm()">+ Loan</button>')+
+      `<div class="stat-strip" id="loanSummary">${uiStat('Total Loans','—')}${uiStat('Total Paid','—')}${uiStat('Outstanding','—')}</div>
+       <div id="loanPanel"><div class="loading-card">Loading loans...</div></div>`;
   }
 
   function uiEmployees(){
@@ -3145,21 +3343,106 @@
     if(amount===null)return;
     google.script.run.withSuccessHandler(function(r){
       if(!r||!r.ok){toast(r&&r.message||'Unable to record payment.');return;}
-      toast(r.message);const empId=r.advance?.EmployeeID||'';loadEmployeeAdvances(empId);loadEmployees();
+      toast(r.message);const empId=r.employeeId||r.advance?.EmployeeID||'';if(empId){loadEmployeeAdvances(empId);}loadEmployees();
     }).withFailureHandler(function(x){toast(x&&x.message||'Unable to record payment.');}).recordEmployeeAdvancePayment(state.token,{advanceId:advanceId,amount:amount});
   }
 
   function uiPayments(){
-    return uiHeader('Payments','Track received payments and outstanding balances','<button class="btn gold">+ Payment</button>')+
-      `<div class="stat-strip">${uiStat('Total Sales','₱0.00')}${uiStat('Collected','₱0.00')}${uiStat('Outstanding','₱0.00')}${uiStat('Due Soon','₱0.00')}</div>`+
-      uiTable(['Client','Booking','Payment Date','Milestone','Amount','Method','Reference','Status'],6);
+    return uiHeader('Payments','Track received payments and outstanding balances','<button class="btn gold" type="button" onclick="openPaymentDialog()">+ Payment</button>')+
+      `<div class="stat-strip" id="paymentsStats">${uiStat('Total Sales','—')}${uiStat('Collected','—')}${uiStat('Outstanding','—')}${uiStat('Payments','—')}</div>
+       <div class="panel"><div id="paymentsPanel"><div class="loading-card">Loading payments...</div></div></div>`;
+  }
+
+  function loadPayments(){
+    const panel=document.getElementById('paymentsPanel');
+    const stats=document.getElementById('paymentsStats');
+    if(panel) panel.innerHTML='<div class="loading-card">Loading payments...</div>';
+    google.script.run
+      .withSuccessHandler(function(r){
+        if(!r||!r.ok){
+          if(panel) panel.innerHTML='<div class="error-card">'+esc(r&&r.message||'Unable to load payments.')+'</div>';
+          return;
+        }
+        const rows=r.payments||[];
+        const totals=r.totals||{};
+        if(stats){
+          stats.innerHTML=
+            uiStat('Total Sales',money(totals.sales))+
+            uiStat('Collected',money(totals.collected))+
+            uiStat('Outstanding',money(totals.outstanding))+
+            uiStat('Payments',String(totals.count||rows.length));
+        }
+        if(!panel) return;
+        panel.innerHTML=`<div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Date</th><th>Booking</th><th>Milestone</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th></tr></thead>
+          <tbody>
+            ${rows.length?rows.map(p=>`<tr>
+              <td>${esc(formatDate(p['Payment Date']||p.Date)||'—')}</td>
+              <td>${esc(p.BookingID||'—')}</td>
+              <td>${esc(p.Milestone||'Payment')}</td>
+              <td>${money(p.Amount)}</td>
+              <td>${esc(p.Method||'—')}</td>
+              <td>${esc(p.Reference||'—')}</td>
+              <td>${esc(p.Status||'Received')}</td>
+            </tr>`).join(''):`<tr><td colspan="7"><div class="empty-state">No payments recorded.</div></td></tr>`}
+          </tbody>
+        </table></div>`;
+      })
+      .withFailureHandler(function(err){
+        if(panel) panel.innerHTML='<div class="error-card">'+esc(err&&err.message||'Unable to load payments.')+'</div>';
+      })
+      .getPayments(state.token);
   }
 
   function uiExpenses(){
-    return uiHeader('Expenses','Event and operating expenses','<button class="btn gold">+ Expense</button>')+
+    return uiHeader('Expenses','Event and operating expenses','<button class="btn gold" type="button" onclick="openExpenseDialog()">+ Expense</button>')+
       `<div class="expense-chips"><span>Food</span><span>Hotel</span><span>Accommodation</span><span>Gas</span><span>Transportation</span><span>Other</span></div>
-       <div class="stat-strip">${uiStat('This Month','₱0.00')}${uiStat('Food','₱0.00')}${uiStat('Hotel','₱0.00')}${uiStat('Gas','₱0.00')}</div>`+
-      uiTable(['Date','Booking','Category','Description','Amount','Receipt','Status'],6);
+       <div class="stat-strip" id="expensesStats">${uiStat('This Month','—')}${uiStat('Food','—')}${uiStat('Hotel','—')}${uiStat('Gas','—')}</div>
+       <div class="panel"><div id="expensesPanel"><div class="loading-card">Loading expenses...</div></div></div>`;
+  }
+
+  function loadExpenses(){
+    const panel=document.getElementById('expensesPanel');
+    const stats=document.getElementById('expensesStats');
+    if(panel) panel.innerHTML='<div class="loading-card">Loading expenses...</div>';
+    google.script.run
+      .withSuccessHandler(function(r){
+        if(!r||!r.ok){
+          if(panel) panel.innerHTML='<div class="error-card">'+esc(r&&r.message||'Unable to load expenses.')+'</div>';
+          return;
+        }
+        const rows=r.expenses||[];
+        const totals=r.totals||{};
+        if(stats){
+          stats.innerHTML=
+            uiStat('This Month',money(totals.monthTotal))+
+            uiStat('Food',money(totals.food))+
+            uiStat('Hotel',money(totals.hotel))+
+            uiStat('Gas',money(totals.gas));
+        }
+        if(!panel) return;
+        panel.innerHTML=`<div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Date</th><th>Booking</th><th>Category</th><th>Description</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            ${rows.length?rows.map(e=>`<tr>
+              <td>${esc(formatDate(e.Date)||'—')}</td>
+              <td>${esc(e.BookingID||'—')}</td>
+              <td>${esc(e.Category||'—')}</td>
+              <td>${esc(e.Description||'—')}</td>
+              <td>${money(e.Amount)}</td>
+              <td>${esc(e['Approval Status']||'Recorded')}</td>
+              <td>
+                <button class="table-action" type="button" onclick='openExpenseDialog(${JSON.stringify({id:e.ID,ID:e.ID,ExpenseID:e.ExpenseID,bookingId:e.BookingID,BookingID:e.BookingID,Category:e.Category,Amount:e.Amount,Date:e.Date,Description:e.Description}).replace(/'/g,"&#39;")})'>Edit</button>
+                <button class="table-action danger-text" type="button" onclick="deleteShowExpenseUI('${esc(e.ID||e.ExpenseID)}')">Delete</button>
+              </td>
+            </tr>`).join(''):`<tr><td colspan="7"><div class="empty-state">No expenses recorded.</div></td></tr>`}
+          </tbody>
+        </table></div>`;
+      })
+      .withFailureHandler(function(err){
+        if(panel) panel.innerHTML='<div class="error-card">'+esc(err&&err.message||'Unable to load expenses.')+'</div>';
+      })
+      .getExpenses(state.token);
   }
 
   function uiDocuments(){
@@ -3636,6 +3919,8 @@
 
   function loadLoans(){
     const panel=document.getElementById('loanPanel');
+    if(!panel) return;
+    panel.innerHTML='<div class="loading-card">Loading loans...</div>';
     google.script.run.withSuccessHandler(function(r){
       if(!r||!r.ok){
         panel.innerHTML='<div class="error-card">'+esc(r&&r.message||'Unable to load loans.')+'</div>'; return;
@@ -3645,11 +3930,14 @@
       const paid=cachedLoans.reduce((s,l)=>s+Number(l['Amount Paid']||0),0);
       const outstanding=cachedLoans.reduce((s,l)=>s+Number(l['Outstanding Balance']||0),0);
 
-      document.getElementById('loanSummary').innerHTML=`
+      const summary=document.getElementById('loanSummary');
+      if(summary){
+        summary.innerHTML=`
         <div class="loan-stat"><span>Total Loans</span><strong>${money(total)}</strong></div>
         <div class="loan-stat"><span>Total Paid</span><strong>${money(paid)}</strong></div>
         <div class="loan-stat"><span>Total Outstanding</span><strong>${money(outstanding)}</strong></div>
       `;
+      }
 
       panel.innerHTML=`
         <div class="panel">
@@ -3875,7 +4163,7 @@
 
   function submitStockIn(e){
     e.preventDefault();const b=document.getElementById('saveStockInBtn');setButtonLoading(b,true,'Saving...');
-    google.script.run.withSuccessHandler(function(r){setButtonLoading(b,false,'Save Stock In');if(!r||!r.ok){toast(r&&r.message||'Unable to save stock-in.');return;}toast(r.message);e.target.reset();}).withFailureHandler(function(x){setButtonLoading(b,false,'Save Stock In');toast(x&&x.message||'Unable to save stock-in.');}).saveStockIn(state.token,{productId:document.getElementById('stockInProduct').value,quantity:document.getElementById('stockInQty').value,purchaseCost:document.getElementById('stockInCost').value,shippingCost:document.getElementById('stockInShipping').value,otherCharges:document.getElementById('stockInOther').value,source:document.getElementById('stockInSource').value,invoiceNumber:document.getElementById('stockInInvoice').value,batchNumber:document.getElementById('stockInBatch').value,storageLocation:document.getElementById('stockInLocation').value});
+    google.script.run.withSuccessHandler(function(r){setButtonLoading(b,false,'Save Stock In');if(!r||!r.ok){toast(r&&r.message||'Unable to save stock-in.');return;}toast(r.message);e.target.reset();renderStockIn();}).withFailureHandler(function(x){setButtonLoading(b,false,'Save Stock In');toast(x&&x.message||'Unable to save stock-in.');}).saveStockIn(state.token,{productId:document.getElementById('stockInProduct').value,quantity:document.getElementById('stockInQty').value,purchaseCost:document.getElementById('stockInCost').value,shippingCost:document.getElementById('stockInShipping').value,otherCharges:document.getElementById('stockInOther').value,source:document.getElementById('stockInSource').value,invoiceNumber:document.getElementById('stockInInvoice').value,batchNumber:document.getElementById('stockInBatch').value,storageLocation:document.getElementById('stockInLocation').value});
   }
 
   function renderStockOut(){
@@ -3887,7 +4175,7 @@
 
   function submitStockOut(e){
     e.preventDefault();const b=document.getElementById('saveStockOutBtn');setButtonLoading(b,true,'Saving...');
-    google.script.run.withSuccessHandler(function(r){setButtonLoading(b,false,'Save Stock Out');if(!r||!r.ok){toast(r&&r.message||'Unable to save stock-out.');return;}toast(r.message);e.target.reset();}).withFailureHandler(function(x){setButtonLoading(b,false,'Save Stock Out');toast(x&&x.message||'Unable to save stock-out.');}).saveStockOut(state.token,{productId:document.getElementById('stockOutProduct').value,quantity:document.getElementById('stockOutQty').value,bookingId:document.getElementById('stockOutBooking').value,reason:document.getElementById('stockOutReason').value,batchNumber:document.getElementById('stockOutBatch').value,storageLocation:document.getElementById('stockOutLocation').value});
+    google.script.run.withSuccessHandler(function(r){setButtonLoading(b,false,'Save Stock Out');if(!r||!r.ok){toast(r&&r.message||'Unable to save stock-out.');return;}toast(r.message);e.target.reset();renderStockOut();}).withFailureHandler(function(x){setButtonLoading(b,false,'Save Stock Out');toast(x&&x.message||'Unable to save stock-out.');}).saveStockOut(state.token,{productId:document.getElementById('stockOutProduct').value,quantity:document.getElementById('stockOutQty').value,bookingId:document.getElementById('stockOutBooking').value,reason:document.getElementById('stockOutReason').value,batchNumber:document.getElementById('stockOutBatch').value,storageLocation:document.getElementById('stockOutLocation').value});
   }
 
 

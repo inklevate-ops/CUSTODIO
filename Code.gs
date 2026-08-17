@@ -193,6 +193,15 @@ function logout(token) {
  * Simple dashboard test payload.
  * This is intentionally small in Phase 1.
  */
+function isInactiveBooking_(booking) {
+  if (!booking) return true;
+  const status = String(booking['Booking Status'] || '').trim().toLowerCase();
+  const archived = String(booking.Archived || '').trim().toLowerCase();
+  if (status === 'cancelled' || status === 'deleted' || status === 'archived') return true;
+  if (archived === 'yes' || archived === 'true' || archived === '1') return true;
+  return false;
+}
+
 function getDashboard(token) {
   const auth = requireAuth_(token);
   if (!auth.ok) return auth;
@@ -209,13 +218,7 @@ function getDashboard(token) {
   // Dashboard "Clients" = unique clients with at least one active (non-cancelled) booking.
   // Do not use Clients sheet row count: orphan/legacy master rows would inflate it.
   // Do not use booking count: one client can have several shows.
-  const activeBookings = bookings.filter(function(b){
-    const status = String(b['Booking Status'] || '').trim().toLowerCase();
-    const archived = String(b.Archived || '').trim().toLowerCase();
-    if (status === 'cancelled' || status === 'deleted' || status === 'archived') return false;
-    if (archived === 'yes' || archived === 'true' || archived === '1') return false;
-    return true;
-  });
+  const activeBookings = bookings.filter(function(b){ return !isInactiveBooking_(b); });
 
   const activeClientKeys = new Set();
   activeBookings.forEach(function(b){
@@ -236,21 +239,34 @@ function getDashboard(token) {
   const today = new Date();
   const todayKey = formatDateKey_(today);
 
-  const upcomingBookings = bookings
+  const upcomingBookings = activeBookings
     .filter(b => {
       const d = toDate_(b['Event Date']);
-      return d && d >= startOfDay_(today) && String(b['Booking Status'] || '') !== 'Cancelled';
+      return d && d >= startOfDay_(today);
     })
     .sort((a, b) => toDate_(a['Event Date']) - toDate_(b['Event Date']));
 
-  const todaysBookings = bookings.filter(b => {
+  const todaysBookings = activeBookings.filter(b => {
     const d = toDate_(b['Event Date']);
     return d && formatDateKey_(d) === todayKey;
   });
 
-  const totalSales = bookings.reduce((sum, b) => sum + number_(b['Final Amount']), 0);
-  const amountCollected = payments.reduce((sum, p) => sum + number_(p.Amount), 0);
-  const outstandingBalance = bookings.reduce((sum, b) => sum + number_(b.Balance), 0);
+  const totalSales = activeBookings.reduce((sum, b) => sum + number_(
+    b['Final Amount'] ?? b['Total Amount Due'] ?? b['Total Amount'] ?? 0
+  ), 0);
+  const activeBookingIds = {};
+  activeBookings.forEach(function(b){
+    const id = String(b.ID || '').trim();
+    const bookingId = String(b.BookingID || '').trim();
+    if (id) activeBookingIds[id] = true;
+    if (bookingId) activeBookingIds[bookingId] = true;
+  });
+  const amountCollected = payments.reduce(function(sum, p){
+    const bid = String(p.BookingID || '').trim();
+    if (bid && !activeBookingIds[bid]) return sum;
+    return sum + number_(p.Amount);
+  }, 0);
+  const outstandingBalance = activeBookings.reduce((sum, b) => sum + number_(b.Balance), 0);
 
   const inventoryValue = inventory.reduce(
     (sum, i) => sum + (
@@ -290,7 +306,7 @@ function getDashboard(token) {
   const monthlyBookings = Array(12).fill(0);
   const monthlySales = Array(12).fill(0);
 
-  bookings.forEach(b => {
+  activeBookings.forEach(b => {
     const d = toDate_(b['Event Date'] || b['Booking Date'] || b['Created Date']);
     if (!d || d.getFullYear() !== currentYear) return;
 
@@ -344,7 +360,7 @@ function getDashboard(token) {
     ok: true,
     user: auth.user,
     metrics: {
-      totalBookings: bookings.length,
+      totalBookings: activeBookings.length,
       upcomingEvents: upcomingBookings.length,
       todaysEvents: todaysBookings.length,
       totalClients: effectiveTotalClients,
@@ -433,7 +449,7 @@ function saveClient(token, payload) {
     return {
       ok:true,
       message:existing ? 'Client updated successfully.' : 'Client created successfully.',
-      client:record
+      clientId:id
     };
   } finally {
     lock.releaseLock();
@@ -549,7 +565,10 @@ function saveClientWorkspace(token, payload) {
       'Updated Date':now
     };
 
-    const eventTimeText = normalizeEventTime_(payload.eventTime);
+    const eventTimeText = String(payload.eventTime || '').trim()
+      ? normalizeEventTime_(payload.eventTime)
+      : (getPersistedBookingEventTime_(bookingId) ||
+         normalizeEventTime_(existingBooking && (existingBooking['Event Time'] || existingBooking.EventTime || existingBooking.Time) || ''));
     // If an older installation has a different booking header, upsertRow_ only writes known headers.
     upsertRow_('Bookings', booking);
     SpreadsheetApp.flush();
@@ -596,17 +615,8 @@ function saveClientWorkspace(token, payload) {
     return {
       ok:true,
       message:existingBooking ? 'Client/show updated successfully.' : 'Client/show created successfully.',
-      client:client,
-      booking:booking,
-      calculations:{
-        subtotal:subtotal,
-        discount:discount,
-        taxRate:0.05,
-        tax:tax,
-        finalAmount:finalAmount,
-        payments:payments,
-        balance:balance
-      }
+      bookingId:bookingId,
+      clientId:clientId
     };
   } finally {
     lock.releaseLock();
@@ -617,7 +627,7 @@ function getClientWorkspace(token, bookingId) {
   const auth = requireAuth_(token);
   if (!auth.ok) return auth;
 
-  const booking = findRowById_('Bookings', String(bookingId || ''));
+  const booking = findBookingRow_(String(bookingId || ''));
   if (!booking) return {ok:false, message:'Booking/show not found.'};
 
   const client = findRowById_('Clients', String(booking.ClientID || ''));
@@ -748,7 +758,7 @@ function saveLoan(token, payload) {
     }
     upsertRow_('Loans', record);
     audit_(auth.user, existing ? 'UPDATE' : 'CREATE', 'Loans', id, record);
-    return {ok:true, message:existing ? 'Loan updated successfully.' : 'Loan recorded successfully.', loan:record};
+    return {ok:true, message:existing ? 'Loan updated successfully.' : 'Loan recorded successfully.', loanId:id};
   } finally {
     lock.releaseLock();
   }
@@ -804,7 +814,7 @@ function recordLoanPayment(token, payload) {
     }
 
     audit_(auth.user, 'LOAN_PAYMENT', 'Loans', loanId, {amount:payment, remaining:loan['Outstanding Balance']});
-    return {ok:true, message:'Loan payment recorded successfully.', loan:loan};
+    return {ok:true, message:'Loan payment recorded successfully.', loanId:loanId};
   } finally {
     lock.releaseLock();
   }
@@ -928,7 +938,7 @@ function recalculateCrewPayForBooking_(bookingId) {
   const id = String(bookingId || '').trim();
   if (!id) return;
 
-  const booking = findRowById_('Bookings', id);
+  const booking = findBookingRow_(id);
   if (!booking) return;
 
   const showTotal = number_(
@@ -939,7 +949,7 @@ function recalculateCrewPayForBooking_(bookingId) {
   );
 
   const crew = getOrEmpty_('BookingCrew')
-    .filter(c => String(c.BookingID || '') === id);
+    .filter(c => matchesBookingKey_(c.BookingID, bookingKeyMap_(booking, id)));
 
   crew.forEach(c => {
     // Only apply the automatic 5% rule when the show total is above ₱60,000.
@@ -987,7 +997,7 @@ function getCalendarData(token, year, month) {
   bookings.forEach(function(b){
     const d = toDate_(b['Event Date']);
     if (!d || d < start || d >= end) return;
-    if (String(b['Booking Status'] || '').toLowerCase() === 'cancelled') return;
+    if (isInactiveBooking_(b)) return;
 
     const client = clientMap.get(String(b.ClientID || '').trim()) || {};
     events.push({
@@ -1064,10 +1074,10 @@ function getShowWorkspace(token, bookingId) {
   const id = String(bookingId || '').trim();
   if (!id) return {ok:false, message:'Booking / show ID is required.'};
 
-  const booking = findRowById_('Bookings', id);
+  const booking = findBookingRow_(id);
   if (!booking) return {ok:false, message:'Client/show not found.'};
 
-  const persistedEventTime = getPersistedBookingEventTime_(id) ||
+  const persistedEventTime = getPersistedBookingEventTime_(String(booking.ID || id)) ||
     normalizeEventTime_(booking['Event Time'] || booking.EventTime || booking.Time || '');
   booking['Event Time'] = persistedEventTime;
 
@@ -1112,10 +1122,11 @@ function getShowWorkspace(token, bookingId) {
   }
 
   const bookingKey = String(booking.ID || booking.BookingID || id);
+  const bookingKeys = bookingKeyMap_(booking, id);
 
   const usage = getOrEmpty_('BookingUsage')
     .filter(function(u){
-      return String(u.BookingID || '').trim() === bookingKey;
+      return matchesBookingKey_(u.BookingID, bookingKeys);
     });
 
   const showTotal = number_(
@@ -1127,7 +1138,7 @@ function getShowWorkspace(token, bookingId) {
 
   const crew = getOrEmpty_('BookingCrew')
     .filter(function(c){
-      return String(c.BookingID || '').trim() === bookingKey;
+      return matchesBookingKey_(c.BookingID, bookingKeys);
     })
     .map(function(c){
       const row = Object.assign({}, c);
@@ -1145,6 +1156,19 @@ function getShowWorkspace(token, bookingId) {
       return row;
     });
 
+  const payments = getOrEmpty_('Payments').filter(function(p){
+    return matchesBookingKey_(p.BookingID, bookingKeys);
+  });
+  const expenses = getOrEmpty_('BookingExpenses').filter(function(e){
+    return matchesBookingKey_(e.BookingID, bookingKeys);
+  });
+  const expenseTotal = expenses.reduce(function(sum, e){ return sum + number_(e.Amount); }, 0);
+  const productCost = usage.filter(function(u){ return String(u['Usage Type']) === 'Product'; })
+    .reduce(function(sum, u){ return sum + number_(u['Total Cost']); }, 0);
+  const materialCost = usage.filter(function(u){ return String(u['Usage Type']) === 'Material'; })
+    .reduce(function(sum, u){ return sum + number_(u['Total Cost']); }, 0);
+  const crewCost = crew.reduce(function(sum, c){ return sum + number_(c.Pay); }, 0);
+
   booking['Event Time'] = normalizeEventTime_(booking['Event Time']);
 
   return {
@@ -1153,7 +1177,16 @@ function getShowWorkspace(token, bookingId) {
     booking:booking,
     eventTime:persistedEventTime || '',
     usage:usage,
-    crew:crew
+    crew:crew,
+    payments:payments,
+    expenses:expenses,
+    totals:{
+      productCost:productCost,
+      materialCost:materialCost,
+      expenses:expenseTotal,
+      crewCost:crewCost,
+      paid:payments.reduce(function(sum, p){ return sum + number_(p.Amount); }, 0)
+    }
   };
 }
 
@@ -1164,7 +1197,8 @@ function getBookingCrew(token, bookingId) {
   const id = String(bookingId || '').trim();
   if (!id) return {ok:false, message:'Booking / show ID is required.'};
 
-  const booking = findRowById_('Bookings', id);
+  const booking = findBookingRow_(id);
+  const bookingKeys = bookingKeyMap_(booking, id);
   const showTotal = booking ? number_(
     booking['Final Amount'] ??
     booking['Total Amount Due'] ??
@@ -1173,7 +1207,7 @@ function getBookingCrew(token, bookingId) {
   ) : 0;
 
   const crew = getOrEmpty_('BookingCrew')
-    .filter(r => String(r.BookingID || '').trim() === id)
+    .filter(r => matchesBookingKey_(r.BookingID, bookingKeys))
     .map(function(r){
       const row = Object.assign({}, r);
       const storedPay = number_(r.Pay);
@@ -1302,7 +1336,7 @@ function saveEmployee(token, payload) {
   try {
     upsertRow_('Employees', record);
     audit_(auth.user, existing ? 'UPDATE' : 'CREATE', 'Employees', id, record);
-    return {ok:true, message:existing ? 'Employee updated successfully.' : 'Employee added successfully.', employee:record};
+    return {ok:true, message:existing ? 'Employee updated successfully.' : 'Employee added successfully.', employeeId:id};
   } finally {
     lock.releaseLock();
   }
@@ -1354,7 +1388,7 @@ function assignEmployeeToShow(token, payload) {
   if (!name) return {ok:false, message:'Employee name is required.'};
   if (!role) return {ok:false, message:'Employee role is required.'};
 
-  const booking = findRowById_('Bookings', bookingId);
+  const booking = findBookingRow_(bookingId);
   if (!booking) return {ok:false, message:'The selected client/show could not be found.'};
 
   const showTotal = Math.max(0, number_(
@@ -1432,10 +1466,11 @@ function assignEmployeeToShow(token, payload) {
 
     const employeeId = String(employee.EmployeeID || employee.ID);
     const bookingKey = String(booking.ID || booking.BookingID || bookingId);
+    const bookingKeys = bookingKeyMap_(booking, bookingId);
 
     // Never assign the same employee twice to the same show.
     const duplicate = getOrEmpty_('BookingCrew').find(function(c){
-      return String(c.BookingID || '').trim() === bookingKey &&
+      return matchesBookingKey_(c.BookingID, bookingKeys) &&
              String(c.EmployeeID || '').trim() === employeeId;
     });
 
@@ -1598,7 +1633,7 @@ function saveEmployeeAdvance(token, payload) {
   try {
     upsertRow_('EmployeeAdvances', record);
     audit_(auth.user, existing ? 'UPDATE' : 'CREATE', 'Employee Advances', id, record);
-    return {ok:true, message:existing ? 'Employee advance/loan updated.' : 'Employee advance/loan recorded.', advance:record};
+    return {ok:true, message:existing ? 'Employee advance/loan updated.' : 'Employee advance/loan recorded.', employeeId:employeeId, advanceId:id};
   } finally {
     lock.releaseLock();
   }
@@ -1628,7 +1663,7 @@ function recordEmployeeAdvancePayment(token, payload) {
     row['Updated Date'] = new Date();
     upsertRow_('EmployeeAdvances', row);
     audit_(auth.user, 'EMPLOYEE_ADVANCE_PAYMENT', 'Employee Advances', id, {amount:payment, remaining:row['Outstanding Balance']});
-    return {ok:true, message:'Employee advance/loan payment recorded.', advance:row};
+    return {ok:true, message:'Employee advance/loan payment recorded.', employeeId:String(row.EmployeeID || ''), advanceId:id};
   } finally {
     lock.releaseLock();
   }
@@ -1823,7 +1858,7 @@ function savePayroll(token, payload) {
     return {
       ok:false,
       message:'Payroll has already been processed for this employee for ' + period + '.',
-      payroll:existing
+      payrollId:String(existing.ID || existing.PayrollID || '')
     };
   }
 
@@ -1918,7 +1953,9 @@ function savePayroll(token, payload) {
     return {
       ok:true,
       message:'Payroll processed successfully.',
-      payroll:payroll
+      payrollId:payrollId,
+      employeeId:employeeId,
+      payrollPeriod:period
     };
   } finally {
     lock.releaseLock();
@@ -1970,7 +2007,7 @@ function saveMaterial(token, payload) {
   try {
     upsertRow_('Materials', record);
     audit_(auth.user, existing ? 'UPDATE' : 'CREATE', 'Materials', id, record);
-    return {ok:true, message:existing ? 'Material updated successfully.' : 'Material created successfully.', material:record};
+    return {ok:true, message:existing ? 'Material updated successfully.' : 'Material created successfully.', materialId:id};
   } finally {
     lock.releaseLock();
   }
@@ -2007,7 +2044,28 @@ function saveMaterialAndSeedStock(token, payload) {
     };
     upsertRow_('Materials', material);
 
-    // Inventory is unified by ItemID; ProductID is also populated for legacy compatibility.
+    // Inventory is derived from StockIn / StockOut. Seed a real StockIn row so
+    // later syncInventoryRecords_() does not wipe the starting quantity.
+    const stockInId = makeId_('SIN');
+    appendRow_('StockIn', {
+      ID:stockInId,
+      StockInID:stockInId,
+      ProductID:materialId,
+      ItemID:materialId,
+      'Product Name':name,
+      Quantity:quantity,
+      'Purchase Cost':purchaseCost,
+      'Shipping Cost':0,
+      'Other Charges':0,
+      Source:'Initial stock',
+      'Invoice Number':'',
+      'Batch Number':'INITIAL-' + materialId,
+      'Storage Location':'Warehouse',
+      'Transaction Date':now,
+      'Created Date':now,
+      'Updated Date':now
+    });
+
     const invId = makeId_('INV');
     appendRow_('Inventory', {
       ID:invId, InventoryID:invId, ProductID:materialId, ItemID:materialId,
@@ -2017,9 +2075,10 @@ function saveMaterialAndSeedStock(token, payload) {
       'Selling Price':0, 'Inventory Value':quantity * purchaseCost,
       'Updated Date':now
     });
+    syncInventoryRecords_();
 
     audit_(auth.user, 'CREATE', 'Materials', materialId, {quantity, purchaseCost});
-    return {ok:true, message:'Material created with initial stock.', material};
+    return {ok:true, message:'Material created with initial stock.', materialId:materialId};
   } finally {
     lock.releaseLock();
   }
@@ -2034,7 +2093,7 @@ function getShowUsageData(token, bookingId) {
   const auth = requireAuth_(token);
   if (!auth.ok) return auth;
 
-  const booking = findRowById_('Bookings', String(bookingId || ''));
+  const booking = findBookingRow_(String(bookingId || ''));
   if (!booking) return {ok:false, message:'Booking / show not found.'};
 
   syncInventoryRecords_();
@@ -2076,7 +2135,7 @@ function getShowUsageData(token, bookingId) {
   });
 
   const usage = getOrEmpty_('BookingUsage')
-    .filter(u => String(u.BookingID || '') === String(bookingId));
+    .filter(u => matchesBookingKey_(u.BookingID, bookingKeyMap_(booking, bookingId)));
 
   return {
     ok:true,
@@ -2114,7 +2173,7 @@ function saveShowUsage(token, payload) {
   lock.waitLock(20000);
 
   try {
-    const booking = findRowById_('Bookings', bookingId);
+    const booking = findBookingRow_(bookingId);
     if (!booking) return {ok:false, message:'Booking / show not found.'};
 
     const masterSheet = usageType === 'Product' ? 'Products' : 'Materials';
@@ -2168,13 +2227,14 @@ function saveShowUsage(token, payload) {
     }
 
     const now = new Date();
+    const bookingRowId = String(booking.ID || bookingId);
     const usageId = makeId_('USE');
     const totalCost = purchaseCost * quantity;
 
     appendRow_('BookingUsage', {
       ID:usageId,
       UsageID:usageId,
-      BookingID:bookingId,
+      BookingID:bookingRowId,
       'Usage Type':usageType,
       ItemID:itemId,
       'Item Name':String(item.Name || ''),
@@ -2198,7 +2258,7 @@ function saveShowUsage(token, payload) {
       'Product Name':String(item.Name || ''),
       Quantity:quantity,
       'Unit Cost':purchaseCost,
-      BookingID:bookingId,
+      BookingID:bookingRowId,
       UsageType:usageType,
       Reason:'Show usage',
       'Batch Number':'',
@@ -2208,23 +2268,11 @@ function saveShowUsage(token, payload) {
       'Updated Date':now
     };
     appendRow_('StockOut', stockOut);
+    syncInventoryRecords_();
 
-    // Update the Inventory row safely.
-    const invRows = getOrEmpty_('Inventory');
-    const currentInv = invRows.find(i => String(i.ID || '') === String(inv.ID || ''));
-    if (currentInv) {
-      currentInv['Current Stock'] = Math.max(0, number_(currentInv['Current Stock']) - quantity);
-      currentInv['Available Stock'] = Math.max(
-        0,
-        number_(currentInv['Current Stock']) - number_(currentInv['Reserved Stock'])
-      );
-      currentInv['Purchase Cost'] = purchaseCost;
-      currentInv['Unit Cost'] = purchaseCost;
-      currentInv['Inventory Value'] =
-        number_(currentInv['Current Stock']) * purchaseCost;
-      currentInv['Updated Date'] = now;
-      upsertRow_('Inventory', currentInv);
-    }
+    const currentInv = getOrEmpty_('Inventory').find(i =>
+      String(i.ProductID || '') === itemId || String(i.ItemID || '') === itemId
+    );
 
     audit_(auth.user, 'SHOW_USAGE', usageType, usageId, {
       bookingId:bookingId,
@@ -2236,6 +2284,8 @@ function saveShowUsage(token, payload) {
     return {
       ok:true,
       message:String(item.Name || '') + ' usage recorded.',
+      usageId:usageId,
+      bookingId:bookingId,
       stock:{
         current:currentInv ? number_(currentInv['Current Stock']) : Math.max(0, available - quantity),
         available:currentInv ? number_(currentInv['Available Stock']) : Math.max(0, available - quantity),
@@ -2243,21 +2293,75 @@ function saveShowUsage(token, payload) {
         status:currentInv
           ? stockStatus_(number_(currentInv['Available Stock']), number_(currentInv['Minimum Stock']))
           : stockStatus_(Math.max(0, available - quantity), number_(item['Minimum Stock']))
-      },
-      usage:{
-        id:usageId,
-        bookingId:bookingId,
-        usageType:usageType,
-        itemId:itemId,
-        itemName:String(item.Name || ''),
-        quantity:quantity,
-        purchaseCost:purchaseCost,
-        totalCost:totalCost
       }
     };
   } finally {
     lock.releaseLock();
   }
+}
+
+function getProductsForShow(token) {
+  const auth = requireAuth_(token);
+  if (!auth.ok) return auth;
+  syncInventoryRecords_();
+  const inventory = getOrEmpty_('Inventory');
+  const items = getOrEmpty_('Products')
+    .filter(function(p){ return String(p.Status || 'Active') !== 'Inactive'; })
+    .map(function(p){
+      const id = String(p.ID || p.ProductID || '');
+      const inv = inventory.find(function(i){ return String(i.ProductID || '') === id; });
+      const available = inv ? number_(inv['Available Stock']) : 0;
+      const minimum = inv ? number_(inv['Minimum Stock']) : number_(p['Minimum Stock']);
+      return {
+        ID:id,
+        Name:String(p.Name || ''),
+        Unit:String(p.Unit || ''),
+        AvailableStock:available,
+        MinimumStock:minimum,
+        StockStatus:stockStatus_(available, minimum)
+      };
+    });
+  return {ok:true, items:items};
+}
+
+function getMaterialsForShow(token) {
+  const auth = requireAuth_(token);
+  if (!auth.ok) return auth;
+  syncInventoryRecords_();
+  const inventory = getOrEmpty_('Inventory');
+  const items = getOrEmpty_('Materials')
+    .filter(function(m){ return String(m.Status || 'Active') !== 'Inactive'; })
+    .map(function(m){
+      const id = String(m.ID || m.MaterialID || '');
+      const inv = inventory.find(function(i){
+        return String(i.ProductID || '') === id || String(i.ItemID || '') === id;
+      });
+      const available = inv ? number_(inv['Available Stock']) : 0;
+      const minimum = inv ? number_(inv['Minimum Stock']) : number_(m['Minimum Stock']);
+      return {
+        ID:id,
+        Name:String(m.Name || ''),
+        Unit:String(m.Unit || ''),
+        AvailableStock:available,
+        MinimumStock:minimum,
+        StockStatus:stockStatus_(available, minimum)
+      };
+    });
+  return {ok:true, items:items};
+}
+
+function saveProductUsage(token, payload) {
+  payload = payload || {};
+  payload.usageType = 'Product';
+  payload.itemId = payload.productId || payload.itemId;
+  return saveShowUsage(token, payload);
+}
+
+function saveMaterialUsage(token, payload) {
+  payload = payload || {};
+  payload.usageType = 'Material';
+  payload.itemId = payload.materialId || payload.itemId;
+  return saveShowUsage(token, payload);
 }
 
 function removeShowUsage(token, usageId) {
@@ -2281,28 +2385,12 @@ function removeShowUsage(token, usageId) {
       number_(r.Quantity) === number_(usage.Quantity)
     );
 
-    const inv = getOrEmpty_('Inventory').find(i =>
-      String(i.ProductID || i.ItemID || '') === String(usage.ItemID || '')
-    );
-
-    const now = new Date();
-    if (inv) {
-      inv['Current Stock'] = number_(inv['Current Stock']) + number_(usage.Quantity);
-      inv['Available Stock'] = Math.max(
-        0,
-        number_(inv['Current Stock']) - number_(inv['Reserved Stock'])
-      );
-      inv['Inventory Value'] =
-        number_(inv['Current Stock']) * number_(usage['Purchase Cost']);
-      inv['Updated Date'] = now;
-      upsertRow_('Inventory', inv);
-    }
-
     if (stockOut && stockOut.ID) deleteRowById_('StockOut', stockOut.ID);
     deleteRowById_('BookingUsage', id);
+    syncInventoryRecords_();
 
     audit_(auth.user, 'REMOVE_SHOW_USAGE', usage['Usage Type'], id, usage);
-    return {ok:true, message:'Usage removed and stock restored.'};
+    return {ok:true, message:'Usage removed and stock restored.', usageId:id};
   } finally {
     lock.releaseLock();
   }
@@ -2338,14 +2426,20 @@ function updateClientShowStatus(token, bookingId, status) {
   lock.waitLock(20000);
 
   try {
-    const booking = findRowById_('Bookings', id);
+    const booking = findBookingRow_(id);
     if (!booking) return {ok:false, message:'Client/show not found.'};
 
     const previous = String(booking['Booking Status'] || 'Pending');
+    const bookingRowId = String(booking.ID || id);
+    const eventTimeText = getPersistedBookingEventTime_(bookingRowId) ||
+      normalizeEventTime_(booking['Event Time'] || booking.EventTime || booking.Time || '');
     booking['Booking Status'] = nextStatus;
     booking['Updated Date'] = new Date();
+    booking['Event Time'] = '';
     upsertRow_('Bookings', booking);
-    recalculateCrewPayForBooking_(id);
+    SpreadsheetApp.flush();
+    setBookingEventTimeText_(bookingRowId, eventTimeText);
+    recalculateCrewPayForBooking_(bookingRowId);
 
     audit_(auth.user, 'STATUS_CHANGE', 'Clients', id, {
       from: previous,
@@ -2354,7 +2448,9 @@ function updateClientShowStatus(token, bookingId, status) {
 
     return {
       ok:true,
-      booking:booking,
+      bookingId:bookingRowId,
+      bookingStatus:nextStatus,
+      eventTime:getPersistedBookingEventTime_(bookingRowId) || eventTimeText,
       message:
         nextStatus === 'Booked' ? 'Client is now booked.' :
         nextStatus === 'Cancelled' ? 'Client/show cancelled.' :
@@ -2373,7 +2469,269 @@ function getPendingClients(token) {
     String(b['Booking Status'] || 'Pending') === 'Pending'
   );
 
-  return {ok:true, bookings:rows};
+  return {ok:true, bookings:rows, clients:rows};
+}
+
+function confirmPendingClient(token, bookingId) {
+  return updateClientShowStatus(token, bookingId, 'Booked');
+}
+
+function cancelClientShow(token, bookingId) {
+  return updateClientShowStatus(token, bookingId, 'Cancelled');
+}
+
+function getPayments(token) {
+  const auth = requireAuth_(token);
+  if (!auth.ok) return auth;
+  const payments = getOrEmpty_('Payments');
+  const bookings = getOrEmpty_('Bookings');
+  const activeBookings = bookings.filter(function(b){ return !isInactiveBooking_(b); });
+  const activeIds = {};
+  activeBookings.forEach(function(b){
+    const id = String(b.ID || '').trim();
+    const bookingId = String(b.BookingID || '').trim();
+    if (id) activeIds[id] = true;
+    if (bookingId) activeIds[bookingId] = true;
+  });
+  const collected = payments.reduce(function(sum, p){
+    const bid = String(p.BookingID || '').trim();
+    if (bid && !activeIds[bid]) return sum;
+    return sum + number_(p.Amount);
+  }, 0);
+  const sales = activeBookings.reduce(function(sum, b){
+    return sum + number_(b['Final Amount'] ?? b['Total Amount Due'] ?? b['Total Amount'] ?? 0);
+  }, 0);
+  const outstanding = activeBookings.reduce(function(sum, b){
+    return sum + number_(b.Balance);
+  }, 0);
+  return {
+    ok:true,
+    payments:payments,
+    totals:{
+      sales:sales,
+      collected:collected,
+      outstanding:outstanding,
+      count:payments.length
+    }
+  };
+}
+
+function getExpenses(token) {
+  const auth = requireAuth_(token);
+  if (!auth.ok) return auth;
+  const expenses = getOrEmpty_('Expenses');
+  const monthKey = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM');
+  const byCategory = {};
+  let monthTotal = 0;
+  expenses.forEach(function(e){
+    const d = toDate_(e.Date);
+    const inMonth = d && Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM') === monthKey;
+    const amount = number_(e.Amount);
+    if (inMonth) {
+      monthTotal += amount;
+      const cat = String(e.Category || 'Other').trim() || 'Other';
+      byCategory[cat] = number_(byCategory[cat]) + amount;
+    }
+  });
+  return {
+    ok:true,
+    expenses:expenses,
+    totals:{
+      monthTotal:monthTotal,
+      food:number_(byCategory.Food),
+      hotel:number_(byCategory.Hotel) + number_(byCategory.Accommodation),
+      gas:number_(byCategory.Gas) + number_(byCategory.Transportation),
+      count:expenses.length
+    }
+  };
+}
+
+
+function saveBookingPayment(token, payload) {
+  const auth = requireAuth_(token);
+  if (!auth.ok) return auth;
+  payload = payload || {};
+
+  const bookingId = String(payload.bookingId || '').trim();
+  const amount = number_(payload.amount);
+  if (!bookingId) return {ok:false, message:'Booking / show is required.'};
+  if (amount <= 0) return {ok:false, message:'Payment amount must be greater than zero.'};
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    ensureSheetIfMissing_(getSpreadsheet_(), 'Payments', ['ID','PaymentID','BookingID','Payment Date','Milestone','Amount','Method','Reference','Notes','Status','Created Date','Updated Date']);
+    const booking = findBookingRow_(bookingId);
+    if (!booking) return {ok:false, message:'Client/show not found.'};
+
+    const bookingRowId = String(booking.ID || bookingId);
+    const eventTimeText = getPersistedBookingEventTime_(bookingRowId) ||
+      normalizeEventTime_(booking['Event Time'] || '');
+    const now = new Date();
+    const paymentId = makeId_('PAYM');
+    appendRow_('Payments', {
+      ID:paymentId,
+      PaymentID:paymentId,
+      BookingID:bookingRowId,
+      'Payment Date':payload.date ? new Date(payload.date) : now,
+      Milestone:String(payload.milestone || 'Payment'),
+      Amount:amount,
+      Method:String(payload.method || 'Cash'),
+      Reference:String(payload.reference || ''),
+      Notes:String(payload.notes || ''),
+      Status:'Received',
+      'Created Date':now,
+      'Updated Date':now
+    });
+
+    refreshBookingPaymentTotals_(booking);
+    booking['Updated Date'] = now;
+    booking['Event Time'] = '';
+    upsertRow_('Bookings', booking);
+    SpreadsheetApp.flush();
+    setBookingEventTimeText_(bookingRowId, eventTimeText);
+
+    audit_(auth.user, 'CREATE', 'Payments', paymentId, {bookingId:bookingRowId, amount:amount});
+    return {ok:true, message:'Payment recorded.', paymentId:paymentId, bookingId:bookingRowId};
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function refreshBookingPaymentTotals_(booking) {
+  if (!booking) return;
+  const keys = bookingKeyMap_(booking);
+  const paid = getOrEmpty_('Payments').reduce(function(sum, p){
+    return matchesBookingKey_(p.BookingID, keys) ? sum + number_(p.Amount) : sum;
+  }, 0);
+  const finalAmount = number_(
+    booking['Final Amount'] ?? booking['Total Amount Due'] ?? booking['Total Amount'] ?? 0
+  );
+  booking['Paid Amount'] = paid;
+  booking.Balance = Math.max(0, finalAmount - paid);
+  booking['Payment Status'] = booking.Balance <= 0 ? 'Paid' : paid > 0 ? 'Partial' : 'Unpaid';
+}
+
+function saveExpense(token, payload) {
+  const auth = requireAuth_(token);
+  if (!auth.ok) return auth;
+  payload = payload || {};
+
+  const amount = number_(payload.amount);
+  const category = String(payload.category || '').trim();
+  if (!category) return {ok:false, message:'Expense category is required.'};
+  if (amount <= 0) return {ok:false, message:'Expense amount must be greater than zero.'};
+
+  const bookingId = String(payload.bookingId || '').trim();
+  let booking = null;
+  if (bookingId) {
+    booking = findBookingRow_(bookingId);
+    if (!booking) return {ok:false, message:'Client/show not found.'};
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    ensureSheetIfMissing_(getSpreadsheet_(), 'Expenses', ['ID','ExpenseID','Date','Amount','Category','SupplierID','BookingID','Description','Approval Status','Created Date','Updated Date']);
+    ensureSheetIfMissing_(getSpreadsheet_(), 'BookingExpenses', ['ID','ExpenseID','BookingID','Date','Category','Description','Amount','Created Date','Updated Date']);
+    const now = new Date();
+    const id = payload.id ? String(payload.id).trim() : makeId_('EXP');
+    const existing = payload.id ? findRowById_('Expenses', id) : null;
+    const bookingRowId = booking ? String(booking.ID || bookingId) : String(existing && existing.BookingID || bookingId || '');
+
+    const record = {
+      ID:id,
+      ExpenseID:id,
+      Date:payload.date ? new Date(payload.date) : (existing ? existing.Date : now),
+      Amount:amount,
+      Category:category,
+      SupplierID:String(payload.supplierId || (existing && existing.SupplierID) || ''),
+      BookingID:bookingRowId,
+      Description:String(payload.description || ''),
+      'Approval Status':String(payload.status || (existing && existing['Approval Status']) || 'Recorded'),
+      'Created Date':existing ? existing['Created Date'] : now,
+      'Updated Date':now
+    };
+
+    upsertRow_('Expenses', record);
+
+    if (bookingRowId) {
+      const bookingExpense = findRowById_('BookingExpenses', id) ||
+        getOrEmpty_('BookingExpenses').find(function(e){
+          return String(e.ExpenseID || '').trim() === id;
+        }) || null;
+      const bookingExpenseId = bookingExpense ? String(bookingExpense.ID || id) : id;
+      upsertRow_('BookingExpenses', {
+        ID:bookingExpenseId,
+        ExpenseID:id,
+        BookingID:bookingRowId,
+        Date:record.Date,
+        Category:category,
+        Description:String(payload.description || ''),
+        Amount:amount,
+        'Created Date':bookingExpense ? bookingExpense['Created Date'] : now,
+        'Updated Date':now
+      });
+    }
+
+    audit_(auth.user, existing ? 'UPDATE' : 'CREATE', 'Expenses', id, {bookingId:bookingRowId, amount:amount, category:category});
+    return {
+      ok:true,
+      message:existing ? 'Expense updated.' : 'Expense recorded.',
+      expenseId:id,
+      bookingId:bookingRowId
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function saveBookingExpense(token, payload) {
+  payload = payload || {};
+  if (!String(payload.bookingId || '').trim()) {
+    return {ok:false, message:'Booking / show is required.'};
+  }
+  return saveExpense(token, payload);
+}
+
+function deleteExpense(token, expenseId) {
+  const auth = requireAuth_(token);
+  if (!auth.ok) return auth;
+  const id = String(expenseId || '').trim();
+  if (!id) return {ok:false, message:'Expense is required.'};
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const expense = findRowById_('Expenses', id) ||
+      findRowById_('BookingExpenses', id) ||
+      getOrEmpty_('Expenses').find(function(e){ return String(e.ExpenseID || '').trim() === id; }) ||
+      getOrEmpty_('BookingExpenses').find(function(e){ return String(e.ExpenseID || '').trim() === id; });
+    if (!expense) return {ok:false, message:'Expense not found.'};
+
+    const expenseKey = String(expense.ID || expense.ExpenseID || id);
+    const expenseIdAlt = String(expense.ExpenseID || expense.ID || id);
+
+    deleteRowById_('Expenses', expenseKey);
+    deleteRowById_('BookingExpenses', expenseKey);
+    deleteRowsByField_('Expenses', 'ExpenseID', expenseKey);
+    deleteRowsByField_('BookingExpenses', 'ExpenseID', expenseKey);
+    if (expenseIdAlt && expenseIdAlt !== expenseKey) {
+      deleteRowById_('Expenses', expenseIdAlt);
+      deleteRowById_('BookingExpenses', expenseIdAlt);
+      deleteRowsByField_('Expenses', 'ExpenseID', expenseIdAlt);
+      deleteRowsByField_('BookingExpenses', 'ExpenseID', expenseIdAlt);
+    }
+
+    audit_(auth.user, 'DELETE', 'Expenses', expenseKey, {});
+    return {ok:true, message:'Expense deleted.', expenseId:expenseKey};
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function deleteBookingExpense(token, expenseId) {
+  return deleteExpense(token, expenseId);
 }
 
 
@@ -2393,9 +2751,10 @@ function updateClientShow(token, payload) {
   lock.waitLock(20000);
 
   try {
-    const booking = findRowById_('Bookings', bookingId);
+    const booking = findBookingRow_(bookingId);
     if (!booking) return {ok:false, message:'Client/show not found.'};
 
+    const bookingRowId = String(booking.ID || bookingId);
     let clientId = String(booking.ClientID || booking.ClientId || '').trim();
     let client = null;
     const clientRows = getOrEmpty_('Clients');
@@ -2475,11 +2834,11 @@ function updateClientShow(token, payload) {
     booking['Updated Date'] = now;
     upsertRow_('Bookings', booking);
     SpreadsheetApp.flush();
-    setBookingEventTimeText_(bookingId, eventTimeText);
-    booking['Event Time'] = getPersistedBookingEventTime_(bookingId) || eventTimeText;
-    recalculateCrewPayForBooking_(bookingId);
+    setBookingEventTimeText_(bookingRowId, eventTimeText);
+    booking['Event Time'] = getPersistedBookingEventTime_(bookingRowId) || eventTimeText;
+    recalculateCrewPayForBooking_(bookingRowId);
 
-    audit_(auth.user, 'UPDATE', 'Clients', bookingId, {
+    audit_(auth.user, 'UPDATE', 'Clients', bookingRowId, {
       clientId:clientId,
       clientName:client.Name
     });
@@ -2489,7 +2848,7 @@ function updateClientShow(token, payload) {
     return {
       ok:true,
       message:'Client/show updated successfully.',
-      bookingId:bookingId,
+      bookingId:bookingRowId,
       clientId:clientId
     };
   } finally {
@@ -2508,10 +2867,7 @@ function deleteClientShow(token, bookingId) {
   lock.waitLock(20000);
 
   try {
-    const booking = findRowById_('Bookings', id) ||
-      getOrEmpty_('Bookings').find(function(row){
-        return String(row.BookingID || '').trim() === id;
-      }) || null;
+    const booking = findBookingRow_(id);
     if (!booking) return {ok:false, message:'Client/show not found.'};
 
     const bookingKey = String(booking.ID || booking.BookingID || id).trim();
@@ -2525,6 +2881,10 @@ function deleteClientShow(token, bookingId) {
           deleteRowsByField_(sheetName, 'BookingID', bookingIdAlt);
         }
       });
+    deleteRowsByField_('CalendarEvents', 'RelatedID', bookingKey);
+    if (bookingIdAlt && bookingIdAlt !== bookingKey) {
+      deleteRowsByField_('CalendarEvents', 'RelatedID', bookingIdAlt);
+    }
 
     deleteRowById_('Bookings', String(booking.ID || bookingKey));
     deleteRowsByField_('Bookings', 'BookingID', bookingKey);
@@ -2557,6 +2917,10 @@ function deleteClientShow(token, bookingId) {
   } finally {
     lock.releaseLock();
   }
+}
+
+function deleteClientShowPermanently(token, bookingId) {
+  return deleteClientShow(token, bookingId);
 }
 
 /* =========================
@@ -2665,7 +3029,7 @@ function saveProduct(token, payload) {
     return {
       ok:true,
       message:existing ? 'Product updated successfully.' : 'Product created successfully.',
-      product:record,
+      productId:id,
       initialStock:existing ? 0 : initialStock
     };
   } finally {
@@ -2752,6 +3116,7 @@ function saveStockIn(token, payload) {
     });
 
     ensureInventoryRecord_(product);
+    syncInventoryRecords_();
     audit_(auth.user, 'STOCK_IN', 'Inventory', productId, { quantity, landedUnitCost, batchNumber });
     return { ok:true, message:'Stock-in recorded successfully.' };
   } finally {
@@ -2795,6 +3160,7 @@ function saveStockOut(token, payload) {
     });
 
     audit_(auth.user, 'STOCK_OUT', 'Inventory', productId, { quantity, bookingId:String(payload.bookingId || '') });
+    syncInventoryRecords_();
     return { ok:true, message:'Stock-out recorded successfully.' };
   } finally {
     lock.releaseLock();
@@ -3090,6 +3456,34 @@ function setBookingEventTimeText_(bookingId, eventTime) {
 
 function findRowById_(sheetName, id) {
   return getOrEmpty_(sheetName).find(r => String(r.ID) === String(id)) || null;
+}
+
+function findBookingRow_(id) {
+  const key = String(id || '').trim();
+  if (!key) return null;
+  return findRowById_('Bookings', key) ||
+    getOrEmpty_('Bookings').find(function(r){
+      return String(r.BookingID || '').trim() === key;
+    }) ||
+    null;
+}
+
+function bookingKeyMap_(booking, extraId) {
+  const map = {};
+  const add = function(value){
+    const key = String(value || '').trim();
+    if (key) map[key] = true;
+  };
+  if (booking) {
+    add(booking.ID);
+    add(booking.BookingID);
+  }
+  add(extraId);
+  return map;
+}
+
+function matchesBookingKey_(value, keyMap) {
+  return !!(keyMap && keyMap[String(value || '').trim()]);
 }
 
 function appendRow_(sheetName, record) {
