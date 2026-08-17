@@ -63,20 +63,36 @@ var COMPLAINT_HEADERS = [
 ];
 
 function doGet() {
-  var ready = false;
-  try { ready = !!PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID'); } catch (e) {}
-  if (!ready) {
+  try {
+    var output = htmlFile_();
+    return output
+      .setTitle('8888 Complaint Monitoring System')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  } catch (err) {
     return HtmlService.createHtmlOutput(
-      '<div style="font-family:Georgia,serif;background:#0b1f3a;color:#f6f1e8;min-height:100vh;display:flex;align-items:center;justify-content:center;margin:0">' +
-      '<div style="max-width:520px;padding:40px;border:1px solid #c9a227;border-radius:16px">' +
-      '<h1 style="margin:0 0 12px 0">8888 Complaint Monitoring System</h1>' +
-      '<p>Run <b>setupSystem</b> in the Apps Script editor, authorize access, then reload this page.</p></div></div>'
-    ).setTitle('8888 CMS').addMetaTag('viewport', 'width=device-width, initial-scale=1');
+      '<div style="font-family:Arial,sans-serif;background:#0b1f3a;color:#f6f1e8;min-height:100vh;padding:40px">' +
+      '<h1>8888 Complaint Monitoring System</h1>' +
+      '<p>The web app could not load the HTML file.</p>' +
+      '<p>In Apps Script, add an HTML file named <b>Index</b> (not Index.html) and paste the Index.html contents into it.</p>' +
+      '<pre style="white-space:pre-wrap;color:#f4e3a1">' + (err && err.message ? err.message : err) + '</pre></div>'
+    )
+      .setTitle('8888 CMS')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
-  return HtmlService.createHtmlOutputFromFile('Index')
-    .setTitle('8888 Complaint Monitoring System')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function htmlFile_() {
+  var names = ['Index', 'index', 'Index.html', 'index.html'];
+  var last = '';
+  for (var i = 0; i < names.length; i++) {
+    try {
+      return HtmlService.createHtmlOutputFromFile(names[i]);
+    } catch (e) {
+      last = e.message || String(e);
+    }
+  }
+  throw new Error(last || 'HTML file named Index was not found.');
 }
 
 function api(request) {

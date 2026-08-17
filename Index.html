@@ -4,9 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>8888 Complaint Monitoring System</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
     :root {
       --navy: #0b1f3a;
@@ -26,18 +23,24 @@
       --radius: 14px;
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; }
-    body {
-      font-family: 'DM Sans', sans-serif;
-      color: var(--ink);
-      background: var(--cream);
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      min-height: 100vh;
+      background: #0b1f3a;
     }
-    h1, h2, h3, .serif { font-family: 'Source Serif 4', Georgia, serif; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--ink);
+      overflow: auto;
+    }
+    h1, h2, h3, .serif { font-family: Georgia, 'Times New Roman', serif; }
     button, input, select, textarea { font-family: inherit; }
     .flag { height: 6px; background: linear-gradient(90deg, #0038a8 0 33%, #fcd116 33% 66%, #ce1126 66% 100%); }
     .hidden { display: none !important; }
     .login-wrap {
-      min-height: 100%; display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
       background: radial-gradient(1200px 500px at 20% -10%, #1c3f6e, var(--navy));
       padding: 24px;
     }
@@ -73,7 +76,7 @@
     .spin { width: 16px; height: 16px; border: 2px solid rgba(11,31,58,.2); border-top-color: var(--navy); border-radius: 50%; animation: spin .7s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .error { color: var(--bad); font-size: 13px; min-height: 18px; margin: 0 0 8px; }
-    .app { display: grid; grid-template-columns: 260px 1fr; min-height: 100%; }
+    .app { display: grid; grid-template-columns: 260px 1fr; min-height: 100vh; background: var(--cream); }
     .sidebar { background: var(--navy); color: #d7e0ec; padding: 18px 12px; position: sticky; top: 0; height: 100vh; overflow: auto; }
     .brand { padding: 8px 12px 18px; border-bottom: 1px solid rgba(255,255,255,.08); margin-bottom: 12px; }
     .brand small { color: var(--gold-2); letter-spacing: .12em; font-size: 10px; text-transform: uppercase; }
@@ -337,12 +340,24 @@
       state.charts = [];
     }
 
+    function loadChartJs() {
+      return new Promise((resolve) => {
+        if (window.Chart) return resolve(true);
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js';
+        s.onload = () => resolve(true);
+        s.onerror = () => resolve(false);
+        document.head.appendChild(s);
+      });
+    }
+
     async function renderDashboard() {
       $('content').innerHTML = '<h1 class="page-title">Dashboard</h1><div class="cards">' +
         [1,2,3,4].map(() => '<div class="card"><div class="skel"></div><div class="skel" style="margin-top:12px;width:40%"></div></div>').join('') +
         '</div>';
       try {
         const d = await api('dashboard');
+        const hasCharts = await loadChartJs();
         $('content').innerHTML = `
           <div class="print-header"><b>Republic of the Philippines</b><br>Department of Labor and Employment<br>8888 Complaint Monitoring Dashboard</div>
           <h1 class="page-title">Dashboard</h1>
@@ -353,11 +368,12 @@
             <div class="card"><div class="kpi-label">Delayed Responses</div><div class="kpi">${d.cards.delayed}</div></div>
           </div>
           <div class="charts">
-            <div class="card"><h3 class="serif" style="margin:0 0 8px">Complaint Category Distribution</h3><canvas id="c1"></canvas></div>
-            <div class="card"><h3 class="serif" style="margin:0 0 8px">Monthly Complaint Trend</h3><canvas id="c2"></canvas></div>
-            <div class="card"><h3 class="serif" style="margin:0 0 8px">Field Office Distribution</h3><canvas id="c3"></canvas></div>
-            <div class="card"><h3 class="serif" style="margin:0 0 8px">Compliance Rate</h3><canvas id="c4"></canvas></div>
+            <div class="card"><h3 class="serif" style="margin:0 0 8px">Complaint Category Distribution</h3>${hasCharts ? '<canvas id="c1"></canvas>' : catTable(d.categoryDistribution)}</div>
+            <div class="card"><h3 class="serif" style="margin:0 0 8px">Monthly Complaint Trend</h3>${hasCharts ? '<canvas id="c2"></canvas>' : catTable(d.monthlyTrend.map(x => ({ category: x.month, count: x.count })))}</div>
+            <div class="card"><h3 class="serif" style="margin:0 0 8px">Field Office Distribution</h3>${hasCharts ? '<canvas id="c3"></canvas>' : catTable(d.fieldOfficeDistribution.map(x => ({ category: x.office, count: x.count })))}</div>
+            <div class="card"><h3 class="serif" style="margin:0 0 8px">Compliance Rate</h3>${hasCharts ? '<canvas id="c4"></canvas>' : '<p><b>' + d.compliance.rate + '%</b> on-time replies</p>'}</div>
           </div>`;
+        if (!hasCharts || !window.Chart) return;
         destroyCharts();
         const colors = ['#0b1f3a', '#c9a227', '#9b1b30', '#1d4e89', '#1f7a4d'];
         state.charts.push(new Chart($('c1'), { type: 'doughnut', data: { labels: d.categoryDistribution.map(x => x.category), datasets: [{ data: d.categoryDistribution.map(x => x.count), backgroundColor: colors }] }, options: { plugins: { legend: { position: 'bottom' } } } }));
@@ -367,6 +383,10 @@
       } catch (err) {
         $('content').innerHTML = '<p class="error">' + esc(err.message) + '</p>';
       }
+    }
+
+    function catTable(rows) {
+      return '<table><tbody>' + (rows || []).map((x) => '<tr><td>' + esc(x.category) + '</td><td>' + esc(x.count) + '</td></tr>').join('') + '</tbody></table>';
     }
 
     function filterBar(extraBtn) {

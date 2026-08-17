@@ -12,13 +12,15 @@ Google Apps Script web app for DOLE HRDS. Uses **two Google Sheets** (`Users`, `
 ## Setup
 
 1. Open [script.google.com](https://script.google.com) and create a project.
-2. Paste `Code.gs` and `Index.html` (File name must be **Index**).
-3. In **Services**, add **Drive API**.
-4. Run `setupSystem`. Authorize Sheets, Drive, and Docs.
-5. Deploy → **Web app**
+2. Paste `Code.gs`.
+3. Add an HTML file named exactly **Index** (the editor will list it as Index.html). Paste the contents of this repo’s `Index.html` into that file. Do not name it `Index.html.html`.
+4. In **Services**, add **Drive API**.
+5. Run `setupSystem`. Authorize Sheets, Drive, and Docs.
+6. Deploy → **Web app**
    - Execute as: **Me**
    - Who has access: **Anyone**
-6. Open the web app URL.
+7. After any code change, open **Deploy → Manage deployments → pencil → New version → Deploy**. The `/exec` link does not update until you publish a new version.
+8. Open the web app URL. If the page is blank, hard-refresh (`Ctrl+F5`) or try an incognito window.
 
 `setupSystem` creates:
 
