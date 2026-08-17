@@ -684,16 +684,29 @@ function deleteRowById_(sheetName, id) {
   const sheet = getSheet_(sheetName);
   if (!sheet || sheet.getLastRow() < 2) return false;
 
+  const key = String(id || '').trim();
+  if (!key) return false;
+
   const headers = getHeaders_(sheet);
-  const idCol = headers.indexOf('ID') + 1;
-  if (!idCol) return false;
+  const columns = ['ID'].concat(alternateIdColumns_(sheetName))
+    .map(function(name){ return headers.indexOf(name) + 1; })
+    .filter(function(col){ return col > 0; });
+  if (!columns.length) return false;
 
-  const values = sheet.getRange(2, idCol, sheet.getLastRow() - 1, 1).getValues().flat();
-  const idx = values.findIndex(v => String(v) === String(id));
-  if (idx < 0) return false;
-
-  sheet.deleteRow(idx + 2);
-  return true;
+  const last = sheet.getLastRow();
+  const width = sheet.getLastColumn();
+  const values = sheet.getRange(2, 1, last - 1, width).getValues();
+  for (let i = 0; i < values.length; i++) {
+    const row = values[i];
+    const matched = columns.some(function(col){
+      return String(row[col - 1] || '').trim() === key;
+    });
+    if (matched) {
+      sheet.deleteRow(i + 2);
+      return true;
+    }
+  }
+  return false;
 }
 
 /* =========================
@@ -1159,9 +1172,7 @@ function getShowWorkspace(token, bookingId) {
   const payments = getOrEmpty_('Payments').filter(function(p){
     return matchesBookingKey_(p.BookingID, bookingKeys);
   });
-  const expenses = getOrEmpty_('BookingExpenses').filter(function(e){
-    return matchesBookingKey_(e.BookingID, bookingKeys);
-  });
+  const expenses = mergeExpenseRows_(bookingKeys);
   const expenseTotal = expenses.reduce(function(sum, e){ return sum + number_(e.Amount); }, 0);
   const productCost = usage.filter(function(u){ return String(u['Usage Type']) === 'Product'; })
     .reduce(function(sum, u){ return sum + number_(u['Total Cost']); }, 0);
@@ -1242,25 +1253,26 @@ function getEmployees(token) {
 
   const result = employees.map(e => {
     const employeeId = String(e.EmployeeID || e.ID || '').trim();
+    const employeeKeys = employeeKeyMap_(e, employeeId);
 
     const assignments = crews.filter(c =>
-      String(c.EmployeeID || '').trim() === employeeId
+      matchesIdKey_(c.EmployeeID, employeeKeys)
     );
 
     const validAssignments = assignments.filter(c => {
-      const booking = bookings.find(b => String(b.ID || b.BookingID || '') === String(c.BookingID || ''));
+      const booking = bookings.find(b => matchesBookingKey_(c.BookingID, bookingKeyMap_(b)));
       if (!booking) return false;
       return String(booking['Booking Status'] || 'Booked') !== 'Cancelled';
     });
 
     const showsThisMonth = validAssignments.filter(c => {
-      const booking = bookings.find(b => String(b.ID || b.BookingID || '') === String(c.BookingID || ''));
+      const booking = bookings.find(b => matchesBookingKey_(c.BookingID, bookingKeyMap_(b)));
       const d = booking ? toDate_(booking['Event Date']) : null;
       return d && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
     }).length;
 
     const showPayThisMonth = validAssignments.reduce((sum, c) => {
-      const booking = bookings.find(b => String(b.ID || b.BookingID || '') === String(c.BookingID || ''));
+      const booking = bookings.find(b => matchesBookingKey_(c.BookingID, bookingKeyMap_(b)));
       if (!booking) return sum;
       const d = toDate_(booking['Event Date']);
       if (!d || d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) return sum;
@@ -1270,7 +1282,7 @@ function getEmployees(token) {
       return sum + pay;
     }, 0);
 
-    const employeeAdvances = advances.filter(a => String(a.EmployeeID || '') === employeeId);
+    const employeeAdvances = advances.filter(a => matchesIdKey_(a.EmployeeID, employeeKeys));
     const outstanding = employeeAdvances.reduce((sum, a) =>
       sum + Math.max(0, number_(a.Amount) - number_(a['Amount Paid'])), 0
     );
@@ -1351,7 +1363,8 @@ function deleteEmployee(token, employeeId) {
   const employee = findRowById_('Employees', id);
   if (!employee) return {ok:false, message:'Employee not found.'};
 
-  const crew = getOrEmpty_('BookingCrew').filter(c => String(c.EmployeeID || '') === id);
+  const employeeKeys = employeeKeyMap_(employee, id);
+  const crew = getOrEmpty_('BookingCrew').filter(c => matchesIdKey_(c.EmployeeID, employeeKeys));
   if (crew.length) {
     return {ok:false, message:'Cannot delete this employee because they are assigned to one or more shows. Set the employee to Inactive instead.'};
   }
@@ -1359,8 +1372,14 @@ function deleteEmployee(token, employeeId) {
   const lock = LockService.getScriptLock();
   lock.waitLock(15000);
   try {
-    deleteRowById_('Employees', id);
-    audit_(auth.user, 'DELETE', 'Employees', id, employee);
+    const rowId = String(employee.ID || id);
+    deleteRowById_('Employees', rowId);
+    const employeeIdAlt = String(employee.EmployeeID || '').trim();
+    if (employeeIdAlt && employeeIdAlt !== rowId) {
+      deleteRowsByField_('Employees', 'EmployeeID', employeeIdAlt);
+    }
+    SpreadsheetApp.flush();
+    audit_(auth.user, 'DELETE', 'Employees', rowId, employee);
     return {ok:true, message:'Employee deleted successfully.'};
   } finally {
     lock.releaseLock();
@@ -1570,8 +1589,14 @@ function deleteBookingCrew(token, crewId) {
   try {
     const crew = findRowById_('BookingCrew', id);
     if (!crew) return {ok:false, message:'Crew assignment not found.'};
-    deleteRowById_('BookingCrew', id);
-    audit_(auth.user, 'DELETE', 'Crew Assignment', id, crew);
+    const rowId = String(crew.ID || id);
+    deleteRowById_('BookingCrew', rowId);
+    const crewIdAlt = String(crew.CrewID || '').trim();
+    if (crewIdAlt && crewIdAlt !== rowId) {
+      deleteRowsByField_('BookingCrew', 'CrewID', crewIdAlt);
+    }
+    SpreadsheetApp.flush();
+    audit_(auth.user, 'DELETE', 'Crew Assignment', rowId, crew);
     return {ok:true, message:'Employee removed from the show.'};
   } finally {
     lock.releaseLock();
@@ -1584,7 +1609,11 @@ function getEmployeeAdvances(token, employeeId) {
   ensureSheetIfMissing_(getSpreadsheet_(), 'EmployeeAdvances', ['ID','AdvanceID','EmployeeID','Employee Name','Type','Amount','Amount Paid','Outstanding Balance','Date','Purpose','Notes','Status','Created Date','Updated Date']);
   const id = String(employeeId || '').trim();
   let rows = getOrEmpty_('EmployeeAdvances');
-  if (id) rows = rows.filter(r => String(r.EmployeeID || '') === id);
+  if (id) {
+    const employee = findRowById_('Employees', id);
+    const employeeKeys = employeeKeyMap_(employee, id);
+    rows = rows.filter(r => matchesIdKey_(r.EmployeeID, employeeKeys));
+  }
   rows = rows.map(r => Object.assign({}, r, {
     Amount:number_(r.Amount),
     'Amount Paid':number_(r['Amount Paid']),
@@ -1696,8 +1725,10 @@ function getPayrollSummary(token, payrollPeriod) {
 
   const bookingMap = new Map();
   bookings.forEach(b => {
-    const id = String(b.ID || b.BookingID || '').trim();
+    const id = String(b.ID || '').trim();
+    const bookingId = String(b.BookingID || '').trim();
     if (id) bookingMap.set(id, b);
+    if (bookingId) bookingMap.set(bookingId, b);
   });
 
   const crewByEmployee = new Map();
@@ -1737,8 +1768,18 @@ function getPayrollSummary(token, payrollPeriod) {
   employees.forEach(employee => {
     const employeeId = String(employee.ID || employee.EmployeeID || '').trim();
     if (!employeeId) return;
+    const employeeKeys = employeeKeyMap_(employee, employeeId);
 
-    const employeeCrews = crewByEmployee.get(employeeId) || [];
+    const employeeCrews = [];
+    const seenCrew = {};
+    Object.keys(employeeKeys).forEach(function(key){
+      (crewByEmployee.get(key) || []).forEach(function(c){
+        const cid = String(c.ID || c.CrewID || '');
+        if (cid && seenCrew[cid]) return;
+        if (cid) seenCrew[cid] = true;
+        employeeCrews.push(c);
+      });
+    });
     const showBreakdown = [];
 
     employeeCrews.forEach(c => {
@@ -1777,12 +1818,22 @@ function getPayrollSummary(token, payrollPeriod) {
     });
 
     const gross = showBreakdown.reduce((sum, x) => sum + number_(x.pay), 0);
-    const employeeAdvances = (advancesByEmployee.get(employeeId) || [])
-      .slice()
-      .sort((a,b) => a.date - b.date);
+    const employeeAdvances = [];
+    const seenAdvance = {};
+    Object.keys(employeeKeys).forEach(function(key){
+      (advancesByEmployee.get(key) || []).forEach(function(a){
+        const aid = String(a.id || '');
+        if (aid && seenAdvance[aid]) return;
+        if (aid) seenAdvance[aid] = true;
+        employeeAdvances.push(a);
+      });
+    });
+    employeeAdvances.sort((a,b) => a.date - b.date);
     const outstanding = employeeAdvances.reduce((sum, a) => sum + a.outstanding, 0);
 
-    const existingPayroll = processedByEmployee.get(employeeId) || null;
+    const existingPayroll = Object.keys(employeeKeys)
+      .map(function(key){ return processedByEmployee.get(key); })
+      .find(Boolean) || null;
     const deduction = existingPayroll
       ? number_(existingPayroll.Deductions)
       : Math.min(gross, outstanding);
@@ -1850,8 +1901,9 @@ function savePayroll(token, payload) {
     'Payment Date','Status','Created Date','Updated Date'
   ]);
 
+  const empKeys = employeeKeyMap_(employee, employeeId);
   const existing = getOrEmpty_('Payroll').find(p =>
-    String(p.EmployeeID || '') === employeeId &&
+    matchesIdKey_(p.EmployeeID, empKeys) &&
     String(p['Payroll Period'] || '') === period
   );
   if (existing) {
@@ -1865,7 +1917,7 @@ function savePayroll(token, payload) {
   const summary = getPayrollSummary(token, period);
   if (!summary.ok) return summary;
 
-  const row = summary.rows.find(r => String(r.EmployeeID) === employeeId);
+  const row = summary.rows.find(r => matchesIdKey_(r.EmployeeID, empKeys));
   if (!row) return {ok:false, message:'No payrollable earnings found for this employee in ' + period + '.'};
 
   const lock = LockService.getScriptLock();
@@ -1874,7 +1926,7 @@ function savePayroll(token, payload) {
   try {
     // Re-check duplicate after acquiring the lock.
     const latestPayroll = getOrEmpty_('Payroll').find(p =>
-      String(p.EmployeeID || '') === employeeId &&
+      matchesIdKey_(p.EmployeeID, empKeys) &&
       String(p['Payroll Period'] || '') === period
     );
     if (latestPayroll) {
@@ -1918,7 +1970,7 @@ function savePayroll(token, payload) {
     let remainingDeduction = deduction;
     if (remainingDeduction > 0) {
       const advanceRows = getOrEmpty_('EmployeeAdvances')
-        .filter(a => String(a.EmployeeID || '') === employeeId)
+        .filter(a => matchesIdKey_(a.EmployeeID, empKeys))
         .sort((a,b) => {
           const da = toDate_(a.Date) || toDate_(a['Created Date']) || new Date(0);
           const db = toDate_(b.Date) || toDate_(b['Created Date']) || new Date(0);
@@ -2385,8 +2437,16 @@ function removeShowUsage(token, usageId) {
       number_(r.Quantity) === number_(usage.Quantity)
     );
 
-    if (stockOut && stockOut.ID) deleteRowById_('StockOut', stockOut.ID);
-    deleteRowById_('BookingUsage', id);
+    if (stockOut) {
+      deleteRowById_('StockOut', String(stockOut.ID || stockOut.StockOutID || ''));
+    }
+    const usageRowId = String(usage.ID || id);
+    deleteRowById_('BookingUsage', usageRowId);
+    const usageIdAlt = String(usage.UsageID || '').trim();
+    if (usageIdAlt && usageIdAlt !== usageRowId) {
+      deleteRowsByField_('BookingUsage', 'UsageID', usageIdAlt);
+    }
+    SpreadsheetApp.flush();
     syncInventoryRecords_();
 
     audit_(auth.user, 'REMOVE_SHOW_USAGE', usage['Usage Type'], id, usage);
@@ -2519,7 +2579,7 @@ function getPayments(token) {
 function getExpenses(token) {
   const auth = requireAuth_(token);
   if (!auth.ok) return auth;
-  const expenses = getOrEmpty_('Expenses');
+  const expenses = mergeExpenseRows_();
   const monthKey = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM');
   const byCategory = {};
   let monthTotal = 0;
@@ -2636,7 +2696,9 @@ function saveExpense(token, payload) {
     ensureSheetIfMissing_(getSpreadsheet_(), 'BookingExpenses', ['ID','ExpenseID','BookingID','Date','Category','Description','Amount','Created Date','Updated Date']);
     const now = new Date();
     const id = payload.id ? String(payload.id).trim() : makeId_('EXP');
-    const existing = payload.id ? findRowById_('Expenses', id) : null;
+    const existing = payload.id
+      ? (findRowById_('Expenses', id) || findRowById_('BookingExpenses', id))
+      : null;
     const bookingRowId = booking ? String(booking.ID || bookingId) : String(existing && existing.BookingID || bookingId || '');
 
     const record = {
@@ -2723,6 +2785,7 @@ function deleteExpense(token, expenseId) {
       deleteRowsByField_('BookingExpenses', 'ExpenseID', expenseIdAlt);
     }
 
+    SpreadsheetApp.flush();
     audit_(auth.user, 'DELETE', 'Expenses', expenseKey, {});
     return {ok:true, message:'Expense deleted.', expenseId:expenseKey};
   } finally {
@@ -2872,7 +2935,23 @@ function deleteClientShow(token, bookingId) {
 
     const bookingKey = String(booking.ID || booking.BookingID || id).trim();
     const bookingIdAlt = String(booking.BookingID || booking.ID || id).trim();
-    const clientId = String(booking.ClientID || booking.ClientId || '').trim();
+    const bookingClientId = String(booking.ClientID || booking.ClientId || '').trim();
+    const clientRows = getOrEmpty_('Clients');
+    const client = clientRows.find(function(row){
+      return String(row.ID || '').trim() === bookingClientId ||
+             String(row.ClientID || '').trim() === bookingClientId;
+    }) || null;
+
+    const clientKeys = {};
+    const addClientKey = function(value){
+      const key = String(value || '').trim();
+      if (key) clientKeys[key] = true;
+    };
+    addClientKey(bookingClientId);
+    if (client) {
+      addClientKey(client.ID);
+      addClientKey(client.ClientID);
+    }
 
     ['BookingCrew','BookingUsage','BookingItems','BookingExpenses','PaymentSchedules','Payments','StockOut','Expenses']
       .forEach(function(sheetName){
@@ -2892,19 +2971,27 @@ function deleteClientShow(token, bookingId) {
       deleteRowsByField_('Bookings', 'BookingID', bookingIdAlt);
     }
 
-    if (clientId) {
+    SpreadsheetApp.flush();
+
+    const remainingClientKeys = Object.keys(clientKeys);
+    if (remainingClientKeys.length) {
       const remaining = getOrEmpty_('Bookings').filter(function(row){
-        return String(row.ClientID || row.ClientId || '').trim() === clientId;
+        return clientKeys[String(row.ClientID || row.ClientId || '').trim()];
       });
       if (!remaining.length) {
-        deleteRowById_('Clients', clientId);
-        deleteRowsByField_('Clients', 'ClientID', clientId);
+        remainingClientKeys.forEach(function(key){
+          deleteRowById_('Clients', key);
+          deleteRowsByField_('Clients', 'ClientID', key);
+        });
       }
     }
 
+    SpreadsheetApp.flush();
+    syncInventoryRecords_();
+
     try {
       audit_(auth.user, 'DELETE', 'Clients', bookingKey, {
-        clientId:clientId,
+        clientId:bookingClientId,
         reason:'Client/show permanently deleted'
       });
     } catch (e) {}
@@ -3275,6 +3362,7 @@ function ensureInventoryRecord_(product) {
 }
 
 function syncInventoryRecords_() {
+  SpreadsheetApp.flush();
   const products = getOrEmpty_('Products');
   products.forEach(ensureInventoryRecord_);
 
@@ -3455,7 +3543,15 @@ function setBookingEventTimeText_(bookingId, eventTime) {
 }
 
 function findRowById_(sheetName, id) {
-  return getOrEmpty_(sheetName).find(r => String(r.ID) === String(id)) || null;
+  const key = String(id || '').trim();
+  if (!key) return null;
+  const alts = alternateIdColumns_(sheetName);
+  return getOrEmpty_(sheetName).find(function(r){
+    if (String(r.ID || '').trim() === key) return true;
+    return alts.some(function(col){
+      return String(r[col] || '').trim() === key;
+    });
+  }) || null;
 }
 
 function findBookingRow_(id) {
@@ -3486,6 +3582,69 @@ function matchesBookingKey_(value, keyMap) {
   return !!(keyMap && keyMap[String(value || '').trim()]);
 }
 
+function alternateIdColumns_(sheetName) {
+  const map = {
+    Bookings:['BookingID'],
+    Clients:['ClientID'],
+    Employees:['EmployeeID'],
+    Products:['ProductID'],
+    Materials:['MaterialID'],
+    Payments:['PaymentID'],
+    Expenses:['ExpenseID'],
+    BookingExpenses:['ExpenseID'],
+    BookingCrew:['CrewID'],
+    BookingUsage:['UsageID'],
+    BookingItems:['BookingItemID'],
+    Payroll:['PayrollID'],
+    Loans:['LoanID'],
+    EmployeeAdvances:['AdvanceID'],
+    CalendarEvents:['EventID'],
+    StockIn:['StockInID'],
+    StockOut:['StockOutID'],
+    Inventory:['InventoryID','ProductID'],
+    PaymentSchedules:['ScheduleID']
+  };
+  return map[sheetName] || [];
+}
+
+function employeeKeyMap_(employee, extraId) {
+  const map = {};
+  const add = function(value){
+    const key = String(value || '').trim();
+    if (key) map[key] = true;
+  };
+  if (employee) {
+    add(employee.ID);
+    add(employee.EmployeeID);
+  }
+  add(extraId);
+  return map;
+}
+
+function matchesIdKey_(value, keyMap) {
+  return !!(keyMap && keyMap[String(value || '').trim()]);
+}
+
+function mergeExpenseRows_(bookingKeys) {
+  const fromExpenses = getOrEmpty_('Expenses');
+  const fromBooking = getOrEmpty_('BookingExpenses');
+  const seen = {};
+  const merged = [];
+  function add(row) {
+    if (!row) return;
+    if (bookingKeys && !matchesBookingKey_(row.BookingID, bookingKeys)) return;
+    const key = String(row.ID || '').trim();
+    const alt = String(row.ExpenseID || '').trim();
+    if ((key && seen[key]) || (alt && seen[alt])) return;
+    if (key) seen[key] = true;
+    if (alt) seen[alt] = true;
+    merged.push(row);
+  }
+  fromExpenses.forEach(add);
+  fromBooking.forEach(add);
+  return merged;
+}
+
 function appendRow_(sheetName, record) {
   const sheet = getSpreadsheet_().getSheetByName(sheetName);
   if (!sheet) throw new Error('Sheet not found: ' + sheetName);
@@ -3502,9 +3661,30 @@ function upsertRow_(sheetName, record) {
 
   const last = sheet.getLastRow();
   if (last > 1) {
-    const ids = sheet.getRange(2, idCol, last - 1, 1).getValues().flat();
-    const idx = ids.findIndex(x => String(x) === String(record.ID));
+    const width = headers.length;
+    const values = sheet.getRange(2, 1, last - 1, width).getValues();
+    const altCols = alternateIdColumns_(sheetName)
+      .map(function(name){ return headers.indexOf(name); })
+      .filter(function(i){ return i >= 0; });
+    const searchKeys = {};
+    const addKey = function(value){
+      const key = String(value || '').trim();
+      if (key) searchKeys[key] = true;
+    };
+    addKey(record.ID);
+    alternateIdColumns_(sheetName).forEach(function(col){ addKey(record[col]); });
+
+    const idx = values.findIndex(function(row){
+      if (searchKeys[String(row[idCol - 1] || '').trim()]) return true;
+      return altCols.some(function(colIdx){
+        return searchKeys[String(row[colIdx] || '').trim()];
+      });
+    });
     if (idx >= 0) {
+      const existingId = values[idx][idCol - 1];
+      if (existingId !== '' && existingId !== undefined && existingId !== null) {
+        record.ID = existingId;
+      }
       sheet.getRange(idx + 2, 1, 1, headers.length)
         .setValues([headers.map(h => record[h] !== undefined ? record[h] : '')]);
       return;
