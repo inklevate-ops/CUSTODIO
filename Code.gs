@@ -2481,35 +2481,51 @@ function deleteClientShow(token, bookingId) {
   lock.waitLock(20000);
 
   try {
-    const booking = findRowById_('Bookings', id);
+    const booking = findRowById_('Bookings', id) ||
+      getOrEmpty_('Bookings').find(function(row){
+        return String(row.BookingID || '').trim() === id;
+      }) || null;
     if (!booking) return {ok:false, message:'Client/show not found.'};
 
-    const eventTimeText = getPersistedBookingEventTime_(id) ||
-      normalizeEventTime_(booking['Event Time'] || booking.EventTime || booking.Time || '');
+    const bookingKey = String(booking.ID || booking.BookingID || id).trim();
+    const bookingIdAlt = String(booking.BookingID || booking.ID || id).trim();
+    const clientId = String(booking.ClientID || booking.ClientId || '').trim();
 
-    // Do not hard-delete transaction history. Mark the booking cancelled/archived
-    // so records remain traceable.
-    booking['Booking Status'] = 'Cancelled';
-    booking['Archived'] = 'Yes';
-    booking['Updated Date'] = new Date();
-    booking['Event Time'] = '';
-    upsertRow_('Bookings', booking);
-    SpreadsheetApp.flush();
-    setBookingEventTimeText_(id, eventTimeText);
+    ['BookingCrew','BookingUsage','BookingItems','BookingExpenses','PaymentSchedules','Payments','StockOut','Expenses']
+      .forEach(function(sheetName){
+        deleteRowsByField_(sheetName, 'BookingID', bookingKey);
+        if (bookingIdAlt && bookingIdAlt !== bookingKey) {
+          deleteRowsByField_(sheetName, 'BookingID', bookingIdAlt);
+        }
+      });
+
+    deleteRowById_('Bookings', String(booking.ID || bookingKey));
+    deleteRowsByField_('Bookings', 'BookingID', bookingKey);
+    if (bookingIdAlt && bookingIdAlt !== bookingKey) {
+      deleteRowsByField_('Bookings', 'BookingID', bookingIdAlt);
+    }
+
+    if (clientId) {
+      const remaining = getOrEmpty_('Bookings').filter(function(row){
+        return String(row.ClientID || row.ClientId || '').trim() === clientId;
+      });
+      if (!remaining.length) {
+        deleteRowById_('Clients', clientId);
+        deleteRowsByField_('Clients', 'ClientID', clientId);
+      }
+    }
 
     try {
-      audit_(auth.user, 'DELETE/ARCHIVE', 'Clients', id, {
-        clientId:String(booking.ClientID || ''),
-        reason:'Client/show deleted from active list'
+      audit_(auth.user, 'DELETE', 'Clients', bookingKey, {
+        clientId:clientId,
+        reason:'Client/show permanently deleted'
       });
     } catch (e) {}
 
-    // Return only HTML-service-safe primitives. Returning Date objects here can make
-    // google.script.run fail AFTER the spreadsheet update has already succeeded.
     return {
       ok:true,
-      message:'Client/show removed from the active list.',
-      bookingId:id
+      message:'Client/show deleted.',
+      bookingId:bookingKey
     };
   } finally {
     lock.releaseLock();
