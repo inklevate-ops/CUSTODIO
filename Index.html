@@ -1471,7 +1471,7 @@
     // Sheets day-fraction
     if(/^0(?:\.\d+)?$/.test(s) || /^\d*\.\d+$/.test(s)){
       const fraction=Number(s);
-      if(isfinite(fraction)){
+      if(isFinite(fraction)){
         const totalMinutes=Math.round((fraction-Math.floor(fraction))*24*60);
         let h=Math.floor(totalMinutes/60)%24;
         const min=String(totalMinutes%60).padStart(2,'0');
