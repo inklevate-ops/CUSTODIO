@@ -206,6 +206,33 @@ function getDashboard(token) {
   const expenses = getOrEmpty_('Expenses');
   const payroll = getOrEmpty_('Payroll');
 
+  // Dashboard "Clients" = unique clients with at least one active (non-cancelled) booking.
+  // Do not use Clients sheet row count: orphan/legacy master rows would inflate it.
+  // Do not use booking count: one client can have several shows.
+  const activeBookings = bookings.filter(function(b){
+    const status = String(b['Booking Status'] || '').trim().toLowerCase();
+    const archived = String(b.Archived || '').trim().toLowerCase();
+    if (status === 'cancelled' || status === 'deleted' || status === 'archived') return false;
+    if (archived === 'yes' || archived === 'true' || archived === '1') return false;
+    return true;
+  });
+
+  const activeClientKeys = new Set();
+  activeBookings.forEach(function(b){
+    const bookingClientId = String(b.ClientID || b.ClientId || '').trim();
+    let key = '';
+    if (bookingClientId) {
+      const matched = clients.find(function(c){
+        return String(c.ID || '').trim() === bookingClientId ||
+               String(c.ClientID || '').trim() === bookingClientId;
+      });
+      key = String((matched && (matched.ID || matched.ClientID)) || bookingClientId).trim();
+    }
+    if (!key) key = String(b['Client Name'] || '').trim().toLowerCase();
+    if (key) activeClientKeys.add(key);
+  });
+  const effectiveTotalClients = activeClientKeys.size;
+
   const today = new Date();
   const todayKey = formatDateKey_(today);
 
@@ -320,7 +347,7 @@ function getDashboard(token) {
       totalBookings: bookings.length,
       upcomingEvents: upcomingBookings.length,
       todaysEvents: todaysBookings.length,
-      totalClients: clients.length,
+      totalClients: effectiveTotalClients,
       totalSuppliers: suppliers.length,
       totalProducts: products.length,
       lowStockItems: lowStock.length,
