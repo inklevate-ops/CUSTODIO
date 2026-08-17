@@ -1778,7 +1778,7 @@
           return;
         }
 
-        toast('Client/show permanently deleted.');
+        toast(r.message || 'Client/show removed from the active list.');
 
         if(activeShowId===id){
           activeShowId='';
@@ -1791,7 +1791,7 @@
         loadClientShowList();
       })
       .withFailureHandler(function(err){
-        toast(err && err.message || 'Unable to delete client/show.');
+        toast((err && (err.message || err)) || 'Unable to delete client/show.');
       })
       .deleteClientShow(state.token,id);
   }

@@ -2484,19 +2484,33 @@ function deleteClientShow(token, bookingId) {
     const booking = findRowById_('Bookings', id);
     if (!booking) return {ok:false, message:'Client/show not found.'};
 
+    const eventTimeText = getPersistedBookingEventTime_(id) ||
+      normalizeEventTime_(booking['Event Time'] || booking.EventTime || booking.Time || '');
+
     // Do not hard-delete transaction history. Mark the booking cancelled/archived
     // so records remain traceable.
     booking['Booking Status'] = 'Cancelled';
     booking['Archived'] = 'Yes';
     booking['Updated Date'] = new Date();
+    booking['Event Time'] = '';
     upsertRow_('Bookings', booking);
+    SpreadsheetApp.flush();
+    setBookingEventTimeText_(id, eventTimeText);
 
-    audit_(auth.user, 'DELETE/ARCHIVE', 'Clients', id, {
-      clientId:String(booking.ClientID || ''),
-      reason:'Client/show deleted from active list'
-    });
+    try {
+      audit_(auth.user, 'DELETE/ARCHIVE', 'Clients', id, {
+        clientId:String(booking.ClientID || ''),
+        reason:'Client/show deleted from active list'
+      });
+    } catch (e) {}
 
-    return {ok:true, message:'Client/show removed from the active list.', booking:booking};
+    // Return only HTML-service-safe primitives. Returning Date objects here can make
+    // google.script.run fail AFTER the spreadsheet update has already succeeded.
+    return {
+      ok:true,
+      message:'Client/show removed from the active list.',
+      bookingId:id
+    };
   } finally {
     lock.releaseLock();
   }
