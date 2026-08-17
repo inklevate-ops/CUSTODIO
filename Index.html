@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>8888 Complaint Monitoring System</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --navy: #0b1f3a;
+      --navy-2: #132a4a;
+      --gold: #c9a227;
+      --gold-2: #f4e3a1;
+      --cream: #f6f1e8;
+      --ink: #1c2430;
+      --muted: #5c6570;
+      --line: #e4ddd0;
+      --ok: #1f7a4d;
+      --warn: #b45309;
+      --bad: #9b1b30;
+      --info: #1d4e89;
+      --white: #fff;
+      --shadow: 0 10px 30px rgba(11, 31, 58, .08);
+      --radius: 14px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      font-family: 'DM Sans', sans-serif;
+      color: var(--ink);
+      background: var(--cream);
+    }
+    h1, h2, h3, .serif { font-family: 'Source Serif 4', Georgia, serif; }
+    button, input, select, textarea { font-family: inherit; }
+    .flag { height: 6px; background: linear-gradient(90deg, #0038a8 0 33%, #fcd116 33% 66%, #ce1126 66% 100%); }
+    .hidden { display: none !important; }
+    .login-wrap {
+      min-height: 100%; display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(1200px 500px at 20% -10%, #1c3f6e, var(--navy));
+      padding: 24px;
+    }
+    .login-card {
+      width: min(440px, 100%); background: var(--white); border-radius: 18px;
+      overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,.28);
+    }
+    .login-head { background: var(--navy); color: var(--gold-2); padding: 28px 28px 22px; text-align: center; }
+    .seal { width: 64px; height: 64px; margin: 0 auto 12px; border: 2px solid var(--gold); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--gold); font-weight: 700; }
+    .login-head h1 { margin: 8px 0 0; font-size: 22px; color: #fff; }
+    .login-head p { margin: 6px 0 0; color: #c9d4e3; font-size: 13px; }
+    .login-body { padding: 24px 28px 28px; }
+    label { display: block; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+    .field { margin-bottom: 14px; }
+    input, select, textarea {
+      width: 100%; border: 1px solid var(--line); background: #fff; border-radius: 10px;
+      padding: 11px 12px; font-size: 14px; color: var(--ink); outline: none; transition: border .2s, box-shadow .2s;
+    }
+    textarea { min-height: 88px; resize: vertical; }
+    input:focus, select:focus, textarea:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(201,162,39,.18); }
+    .btn {
+      border: 0; border-radius: 10px; padding: 11px 16px; font-weight: 700; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      transition: transform .15s, filter .15s, background .15s; position: relative;
+    }
+    .btn:hover { transform: translateY(-1px); filter: brightness(1.05); }
+    .btn:disabled { opacity: .7; cursor: wait; transform: none; }
+    .btn-gold { background: var(--gold); color: var(--navy); width: 100%; }
+    .btn-navy { background: var(--navy); color: #fff; }
+    .btn-outline { background: #fff; border: 1px solid var(--line); color: var(--ink); }
+    .btn-danger { background: var(--bad); color: #fff; }
+    .btn-sm { padding: 8px 12px; font-size: 13px; }
+    .spin { width: 16px; height: 16px; border: 2px solid rgba(11,31,58,.2); border-top-color: var(--navy); border-radius: 50%; animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error { color: var(--bad); font-size: 13px; min-height: 18px; margin: 0 0 8px; }
+    .app { display: grid; grid-template-columns: 260px 1fr; min-height: 100%; }
+    .sidebar { background: var(--navy); color: #d7e0ec; padding: 18px 12px; position: sticky; top: 0; height: 100vh; overflow: auto; }
+    .brand { padding: 8px 12px 18px; border-bottom: 1px solid rgba(255,255,255,.08); margin-bottom: 12px; }
+    .brand small { color: var(--gold-2); letter-spacing: .12em; font-size: 10px; text-transform: uppercase; }
+    .brand h2 { margin: 6px 0 0; color: #fff; font-size: 17px; line-height: 1.3; }
+    .nav-btn {
+      width: 100%; text-align: left; background: transparent; color: inherit; border: 0;
+      padding: 10px 12px; border-radius: 10px; cursor: pointer; margin-bottom: 4px; font-weight: 500;
+    }
+    .nav-btn:hover, .nav-btn.active { background: rgba(201,162,39,.16); color: var(--gold-2); }
+    .main { min-width: 0; }
+    .topbar {
+      background: #fff; border-bottom: 1px solid var(--line); padding: 14px 22px;
+      display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+    }
+    .who { font-size: 13px; color: var(--muted); }
+    .who b { color: var(--navy); }
+    .content { padding: 22px; }
+    .page-title { margin: 0 0 18px; font-size: 28px; color: var(--navy); }
+    .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
+    .card { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; }
+    .kpi { font-size: 32px; font-weight: 700; color: var(--navy); margin: 4px 0 0; }
+    .kpi-label { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+    .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; align-items: end; }
+    .toolbar .field { margin: 0; min-width: 160px; flex: 1; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 10px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { cursor: pointer; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; background: #fbf8f2; }
+    tr:hover td { background: #faf7f1; }
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .b-pending { background: #eef3f9; color: var(--info); }
+    .b-ok { background: #e8f6ee; color: var(--ok); }
+    .b-bad { background: #fdecee; color: var(--bad); }
+    .b-warn { background: #fff4e5; color: var(--warn); }
+    .b-gold { background: #f8efd2; color: #7a5c12; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+    .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .ai-box { background: #f8efd2; border: 1px solid #e6d38a; border-radius: 12px; padding: 12px; margin: 8px 0 14px; }
+    .timeline { border-left: 3px solid var(--gold); padding-left: 14px; }
+    .tl-item { margin: 0 0 14px; }
+    .tl-item b { display: block; color: var(--navy); }
+    .docs a { color: var(--info); }
+    .modal-bg { position: fixed; inset: 0; background: rgba(11,31,58,.45); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 18px; }
+    .modal { background: #fff; border-radius: 16px; max-width: 480px; width: 100%; padding: 22px; }
+    .toast { position: fixed; right: 18px; bottom: 18px; background: var(--navy); color: #fff; padding: 12px 16px; border-radius: 10px; z-index: 60; }
+    .print-header { display: none; }
+    .skel { height: 18px; background: linear-gradient(90deg, #eee, #f7f7f7, #eee); background-size: 200% 100%; animation: shine 1.2s infinite; border-radius: 6px; }
+    @keyframes shine { to { background-position: -200% 0; } }
+    @media (max-width: 980px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { height: auto; position: relative; }
+      .cards, .charts, .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    }
+    @media print {
+      .sidebar, .topbar, .toolbar, .btn, .nav-btn, .flag, .no-print { display: none !important; }
+      .app { display: block; }
+      .print-header { display: block; text-align: center; margin-bottom: 18px; }
+      .card { box-shadow: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="flag"></div>
+  <div id="login-view" class="login-wrap">
+    <div class="login-card">
+      <div class="login-head">
+        <div class="seal">8888</div>
+        <small>REPUBLIC OF THE PHILIPPINES</small>
+        <h1>8888 Complaint Monitoring</h1>
+        <p>Department of Labor and Employment · HRDS</p>
+      </div>
+      <form class="login-body" id="login-form">
+        <div class="field"><label>Username</label><input id="login-user" autocomplete="username" required></div>
+        <div class="field"><label>Password</label><input id="login-pass" type="password" autocomplete="current-password" required></div>
+        <p class="error" id="login-error"></p>
+        <button class="btn btn-gold" id="login-btn" type="submit">Sign in</button>
+        <p class="hint" style="margin-top:14px;text-align:center">admin / Admin@8888 · encoder / Encoder@8888 · viewer / Viewer@8888</p>
+      </form>
+    </div>
+  </div>
+
+  <div id="app-view" class="app hidden">
+    <aside class="sidebar">
+      <div class="brand">
+        <small>DOLE · HRDS</small>
+        <h2>8888 Citizens’ Complaint Hotline</h2>
+      </div>
+      <button class="nav-btn active" data-route="dashboard">Dashboard</button>
+      <button class="nav-btn" data-route="complaints">Complaints</button>
+      <button class="nav-btn" data-route="action-slip">RD Action Slip</button>
+      <button class="nav-btn" data-route="endorsements">Endorsements</button>
+      <button class="nav-btn" data-route="monitoring">24-Hour Monitoring</button>
+      <button class="nav-btn" data-route="hrds">HRDS Action Taken</button>
+      <button class="nav-btn" data-route="documents">Documents</button>
+      <button class="nav-btn" data-route="reports">Monthly Reports</button>
+      <button class="nav-btn admin-only hidden" data-route="users">User Management</button>
+    </aside>
+    <section class="main">
+      <div class="topbar">
+        <div>
+          <div class="serif" style="font-size:15px;color:var(--navy)">Monitoring and Reporting System</div>
+          <div class="who">Signed in as <b id="who-name"></b> · <span id="who-role"></span></div>
+        </div>
+        <button class="btn btn-outline btn-sm" id="logout-btn">Sign out</button>
+      </div>
+      <div class="content" id="content"></div>
+    </section>
+  </div>
+  <div id="modal-root"></div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script>
+    const state = {
+      token: sessionStorage.getItem('cms8888_token'),
+      user: JSON.parse(sessionStorage.getItem('cms8888_user') || 'null'),
+      lookups: JSON.parse(sessionStorage.getItem('cms8888_lookups') || 'null'),
+      route: 'dashboard',
+      param: null,
+      charts: []
+    };
+
+    const $ = (id) => document.getElementById(id);
+    const canWrite = () => state.user && state.user.role !== 'Viewer';
+    const isAdmin = () => state.user && state.user.role === 'Administrator';
+
+    function toast(msg) {
+      const el = $('toast');
+      el.textContent = msg;
+      el.classList.remove('hidden');
+      setTimeout(() => el.classList.add('hidden'), 2800);
+    }
+
+    function api(action, payload) {
+      return new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler((res) => {
+            if (!res || res.ok === false) reject(new Error((res && res.error) || 'Request failed'));
+            else resolve(res.data);
+          })
+          .withFailureHandler((err) => reject(err))
+          .api({ action, token: state.token, payload: payload || {} });
+      });
+    }
+
+    function setBusy(btn, busy, label) {
+      if (!btn) return;
+      btn.disabled = !!busy;
+      btn.innerHTML = busy ? '<span class="spin"></span> Please wait' : (label || btn.dataset.label || 'Save');
+    }
+
+    function badge(status) {
+      const s = String(status || '');
+      let cls = 'b-pending';
+      if (/Completed|Within 24/.test(s)) cls = 'b-ok';
+      else if (/Delayed|Requires/.test(s)) cls = 'b-bad';
+      else if (/Pending Reply|Pending RD/.test(s)) cls = 'b-warn';
+      else if (/Approved|Endorsed|Forwarded/.test(s)) cls = 'b-gold';
+      return '<span class="badge ' + cls + '">' + esc(s || '—') + '</span>';
+    }
+
+    function esc(v) {
+      return String(v == null ? '' : v)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function fmt(v) {
+      if (!v) return '—';
+      return String(v).replace('T', ' ').slice(0, 16);
+    }
+
+    function fileToPayload(file) {
+      return new Promise((resolve, reject) => {
+        if (!file) return resolve(null);
+        if (file.size > 8 * 1024 * 1024) return reject(new Error('File exceeds 8 MB.'));
+        const reader = new FileReader();
+        reader.onload = () => resolve({
+          name: file.name,
+          mimeType: file.type,
+          data: String(reader.result).split(',')[1]
+        });
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function confirmModal(title, body) {
+      return new Promise((resolve) => {
+        $('modal-root').innerHTML = '<div class="modal-bg"><div class="modal"><h3 class="serif" style="margin-top:0">' + esc(title) + '</h3><p>' + esc(body) + '</p><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-outline btn-sm" id="m-no">Cancel</button><button class="btn btn-navy btn-sm" id="m-yes">Confirm</button></div></div></div>';
+        $('m-no').onclick = () => { $('modal-root').innerHTML = ''; resolve(false); };
+        $('m-yes').onclick = () => { $('modal-root').innerHTML = ''; resolve(true); };
+      });
+    }
+
+    function showApp() {
+      $('login-view').classList.add('hidden');
+      $('app-view').classList.remove('hidden');
+      $('who-name').textContent = state.user.name;
+      $('who-role').textContent = state.user.role;
+      document.querySelectorAll('.admin-only').forEach((el) => el.classList.toggle('hidden', !isAdmin()));
+      go(state.route || 'dashboard');
+    }
+
+    function go(route, param) {
+      state.route = route;
+      state.param = param || null;
+      document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.route === route));
+      const map = {
+        dashboard: renderDashboard,
+        complaints: renderComplaints,
+        'complaint-new': renderComplaintForm,
+        'complaint-view': renderComplaintView,
+        'action-slip': () => renderQueue('action-slip'),
+        endorsements: () => renderQueue('endorsements'),
+        monitoring: () => renderQueue('monitoring'),
+        hrds: () => renderQueue('hrds'),
+        documents: renderDocuments,
+        reports: renderReports,
+        users: renderUsers
+      };
+      (map[route] || renderDashboard)();
+    }
+
+    document.querySelectorAll('.nav-btn').forEach((b) => b.onclick = () => go(b.dataset.route));
+    $('logout-btn').onclick = async () => {
+      try { await api('logout'); } catch (e) {}
+      sessionStorage.clear();
+      location.reload();
+    };
+
+    $('login-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = $('login-btn');
+      btn.dataset.label = 'Sign in';
+      $('login-error').textContent = '';
+      setBusy(btn, true);
+      try {
+        const data = await api('login', { username: $('login-user').value, password: $('login-pass').value });
+        state.token = data.token;
+        state.user = data.user;
+        state.lookups = data.lookups;
+        sessionStorage.setItem('cms8888_token', data.token);
+        sessionStorage.setItem('cms8888_user', JSON.stringify(data.user));
+        sessionStorage.setItem('cms8888_lookups', JSON.stringify(data.lookups));
+        showApp();
+      } catch (err) {
+        $('login-error').textContent = err.message;
+      } finally {
+        setBusy(btn, false, 'Sign in');
+      }
+    };
+
+    function options(list, selected) {
+      return ['<option value="">Select</option>'].concat((list || []).map((v) =>
+        '<option ' + (v === selected ? 'selected' : '') + '>' + esc(v) + '</option>'
+      )).join('');
+    }
+
+    function destroyCharts() {
+      state.charts.forEach((c) => { try { c.destroy(); } catch (e) {} });
+      state.charts = [];
+    }
+
+    async function renderDashboard() {
+      $('content').innerHTML = '<h1 class="page-title">Dashboard</h1><div class="cards">' +
+        [1,2,3,4].map(() => '<div class="card"><div class="skel"></div><div class="skel" style="margin-top:12px;width:40%"></div></div>').join('') +
+        '</div>';
+      try {
+        const d = await api('dashboard');
+        $('content').innerHTML = `
+          <div class="print-header"><b>Republic of the Philippines</b><br>Department of Labor and Employment<br>8888 Complaint Monitoring Dashboard</div>
+          <h1 class="page-title">Dashboard</h1>
+          <div class="cards">
+            <div class="card"><div class="kpi-label">Total 8888 Complaints</div><div class="kpi">${d.cards.total}</div></div>
+            <div class="card"><div class="kpi-label">Pending Complaints</div><div class="kpi">${d.cards.pending}</div></div>
+            <div class="card"><div class="kpi-label">Completed Complaints</div><div class="kpi">${d.cards.completed}</div></div>
+            <div class="card"><div class="kpi-label">Delayed Responses</div><div class="kpi">${d.cards.delayed}</div></div>
+          </div>
+          <div class="charts">
+            <div class="card"><h3 class="serif" style="margin:0 0 8px">Complaint Category Distribution</h3><canvas id="c1"></canvas></div>
+            <div class="card"><h3 class="serif" style="margin:0 0 8px">Monthly Complaint Trend</h3><canvas id="c2"></canvas></div>
+            <div class="card"><h3 class="serif" style="margin:0 0 8px">Field Office Distribution</h3><canvas id="c3"></canvas></div>
+            <div class="card"><h3 class="serif" style="margin:0 0 8px">Compliance Rate</h3><canvas id="c4"></canvas></div>
+          </div>`;
+        destroyCharts();
+        const colors = ['#0b1f3a', '#c9a227', '#9b1b30', '#1d4e89', '#1f7a4d'];
+        state.charts.push(new Chart($('c1'), { type: 'doughnut', data: { labels: d.categoryDistribution.map(x => x.category), datasets: [{ data: d.categoryDistribution.map(x => x.count), backgroundColor: colors }] }, options: { plugins: { legend: { position: 'bottom' } } } }));
+        state.charts.push(new Chart($('c2'), { type: 'line', data: { labels: d.monthlyTrend.map(x => x.month), datasets: [{ label: 'Complaints', data: d.monthlyTrend.map(x => x.count), borderColor: '#0b1f3a', backgroundColor: 'rgba(201,162,39,.25)', fill: true, tension: .3 }] } }));
+        state.charts.push(new Chart($('c3'), { type: 'bar', data: { labels: d.fieldOfficeDistribution.map(x => x.office), datasets: [{ label: 'Tickets', data: d.fieldOfficeDistribution.map(x => x.count), backgroundColor: '#1d4e89' }] }, options: { indexAxis: 'y', plugins: { legend: { display: false } } } }));
+        state.charts.push(new Chart($('c4'), { type: 'doughnut', data: { labels: ['Within 24 Hours', 'Delayed', 'Pending Reply'], datasets: [{ data: [d.compliance.within, d.compliance.delayed, d.compliance.pending], backgroundColor: ['#1f7a4d', '#9b1b30', '#b45309'] }] }, options: { plugins: { title: { display: true, text: d.compliance.rate + '% on-time replies' } } } }));
+      } catch (err) {
+        $('content').innerHTML = '<p class="error">' + esc(err.message) + '</p>';
+      }
+    }
+
+    function filterBar(extraBtn) {
+      const L = state.lookups || {};
+      return `<div class="toolbar no-print">
+        <div class="field"><label>Ticket / Subject</label><input id="f-q" placeholder="8888-2026-0001"></div>
+        <div class="field"><label>Month</label><input id="f-month" type="month"></div>
+        <div class="field"><label>Category</label><select id="f-cat">${options(L.categories)}</select></div>
+        <div class="field"><label>Status</label><select id="f-status">${options(['Pending RD Approval','RD Approved','Endorsed','Pending Reply','Within 24 Hours','Delayed','Forwarded to HRDS','Completed','Requires Further Action'])}</select></div>
+        <div class="field"><label>Field Office</label><select id="f-office">${options(L.fieldOffices)}</select></div>
+        <button class="btn btn-navy btn-sm" id="f-go">Search</button>
+        ${extraBtn || ''}
+      </div>`;
+    }
+
+    function filters() {
+      return {
+        q: ($('f-q') || {}).value,
+        month: ($('f-month') || {}).value,
+        category: ($('f-cat') || {}).value,
+        status: ($('f-status') || {}).value,
+        field_office: ($('f-office') || {}).value
+      };
+    }
+
+    function tableHtml(items, clickable) {
+      if (!items.length) return '<div class="card">No records found.</div>';
+      return `<div class="card" style="overflow:auto"><table id="data-table">
+        <thead><tr>
+          <th data-k="ticket_number">Ticket No.</th><th data-k="date_received">Date Received</th>
+          <th data-k="subject">Subject</th><th data-k="category">Category</th>
+          <th data-k="endorsed_to">Field Office</th><th data-k="status">Status</th>
+        </tr></thead>
+        <tbody>${items.map((c) => `<tr data-id="${esc(c.id)}" style="cursor:pointer">
+          <td><b>${esc(c.ticket_number)}</b></td><td>${esc(String(c.date_received).slice(0,10))}</td>
+          <td>${esc(c.subject)}</td><td>${esc(c.category)}</td>
+          <td>${esc(c.endorsed_to || '—')}</td><td>${badge(c.status)}</td>
+        </tr>`).join('')}</tbody></table></div>`;
+    }
+
+    function bindTable(items) {
+      document.querySelectorAll('#data-table tbody tr').forEach((tr) => tr.onclick = () => go('complaint-view', tr.dataset.id));
+      document.querySelectorAll('#data-table th').forEach((th) => th.onclick = () => {
+        const k = th.dataset.k;
+        items.sort((a, b) => String(a[k] || '').localeCompare(String(b[k] || '')));
+        const box = document.querySelector('#data-table').parentElement;
+        box.outerHTML = tableHtml(items);
+        bindTable(items);
+      });
+    }
+
+    async function renderComplaints() {
+      $('content').innerHTML = '<h1 class="page-title">Complaint Management</h1>' + filterBar(canWrite() ? '<button class="btn btn-gold btn-sm" id="new-c">New Complaint</button>' : '');
+      const load = async () => {
+        const data = await api('listComplaints', filters());
+        const existing = document.querySelector('#data-table');
+        const html = tableHtml(data.items);
+        if (existing) existing.parentElement.outerHTML = html;
+        else $('content').insertAdjacentHTML('beforeend', html);
+        bindTable(data.items);
+      };
+      $('f-go').onclick = load;
+      if ($('new-c')) $('new-c').onclick = () => go('complaint-new');
+      await load();
+    }
+
+    function formFields(c) {
+      c = c || {};
+      const L = state.lookups || {};
+      return `
+        <div class="grid-2">
+          <div class="field"><label>8888 Reference / Ticket Number *</label><input id="c-ticket" value="${esc(c.ticket_number || '')}" required></div>
+          <div class="field"><label>Date Received from Central Office *</label><input id="c-date" type="date" value="${esc(String(c.date_received || '').slice(0,10))}" required></div>
+        </div>
+        <div class="field"><label>Complaint Subject *</label><input id="c-subject" value="${esc(c.subject || '')}" required></div>
+        <div class="grid-2">
+          <div class="field"><label>Nature of Call</label><input id="c-nature" value="${esc(c.nature_of_call || '')}"></div>
+          <div class="field"><label>Complainant Name (optional)</label><input id="c-name" value="${esc(c.complainant_name || '')}"></div>
+        </div>
+        <div class="field"><label>Complainant Location *</label><input id="c-loc" value="${esc(c.complainant_location || '')}" required></div>
+        <div class="field"><label>Complaint Category *</label><select id="c-cat">${options(L.categories, c.category)}</select></div>
+        <div id="ai-result"></div>
+        <div class="field"><label>Original 8888 Complaint Document (PDF, DOCX, or image)</label>
+          <input id="c-file" type="file" accept=".pdf,.doc,.docx,image/*">
+          <div class="hint">Each file is stored in Google Drive under this ticket number. Narrative text is not saved.</div>
+        </div>`;
+    }
+
+    async function renderComplaintForm() {
+      $('content').innerHTML = `<h1 class="page-title">New 8888 Complaint</h1>
+        <div class="card">
+          ${formFields()}
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-outline" id="ai-btn" type="button">Extract with AI</button>
+            <button class="btn btn-navy" id="save-c" type="button" data-label="Save Complaint">Save Complaint</button>
+          </div>
+          <p class="error" id="form-err"></p>
+        </div>`;
+      $('ai-btn').onclick = runExtract;
+      $('save-c').onclick = async () => {
+        $('form-err').textContent = '';
+        const btn = $('save-c');
+        setBusy(btn, true);
+        try {
+          const file = await fileToPayload($('c-file').files[0]);
+          const data = await api('createComplaint', payloadFromForm(file));
+          toast('Complaint saved.');
+          go('complaint-view', data.complaint.id);
+        } catch (err) { $('form-err').textContent = err.message; }
+        finally { setBusy(btn, false, 'Save Complaint'); }
+      };
+    }
+
+    function payloadFromForm(file) {
+      return {
+        ticket_number: $('c-ticket').value,
+        date_received: $('c-date').value,
+        subject: $('c-subject').value,
+        nature_of_call: $('c-nature').value,
+        complainant_name: $('c-name').value,
+        complainant_location: $('c-loc').value,
+        category: $('c-cat').value,
+        suggested_category: state.suggestedCategory || $('c-cat').value,
+        category_confidence: state.categoryConfidence || '',
+        file
+      };
+    }
+
+    async function runExtract() {
+      const btn = $('ai-btn');
+      setBusy(btn, true, 'Extracting');
+      try {
+        const file = $('c-file').files[0];
+        if (!file) throw new Error('Choose the original complaint document first.');
+        const extracted = await api('extractDocument', { file: await fileToPayload(file) });
+        if (extracted.ticket_number) $('c-ticket').value = extracted.ticket_number;
+        if (extracted.subject) $('c-subject').value = extracted.subject;
+        if (extracted.nature_of_call) $('c-nature').value = extracted.nature_of_call;
+        if (extracted.complainant_location) $('c-loc').value = extracted.complainant_location;
+        if (extracted.suggested_category) $('c-cat').value = extracted.suggested_category;
+        state.suggestedCategory = extracted.suggested_category;
+        state.categoryConfidence = extracted.category_confidence;
+        $('ai-result').innerHTML = `<div class="ai-box"><b>Suggested category:</b> ${esc(extracted.suggested_category)}
+          · Confidence ${(extracted.category_confidence * 100).toFixed(0)}%<br>
+          <span class="hint">${esc(extracted.note)}${extracted.matched_keywords && extracted.matched_keywords.length ? ' · Keywords: ' + extracted.matched_keywords.join(', ') : ''}</span>
+          <div class="hint">Confirm or change the category before saving. Full complaint details are not displayed or stored.</div></div>`;
+      } catch (err) { $('ai-result').innerHTML = '<p class="error">' + esc(err.message) + '</p>'; }
+      finally { setBusy(btn, false, 'Extract with AI'); }
+    }
+
+    async function renderComplaintView() {
+      $('content').innerHTML = '<div class="skel"></div>';
+      try {
+        const { complaint: c } = await api('getComplaint', { id: state.param });
+        const write = canWrite();
+        const L = state.lookups || {};
+        $('content').innerHTML = `
+          <div class="print-header" id="print-block">
+            <b>Republic of the Philippines</b><br>Department of Labor and Employment — Regional Office<br>
+            Human Resource Development Section<br><h2>Individual Complaint Record</h2>
+            <div>Ticket ${esc(c.ticket_number)}</div>
+          </div>
+          <div class="toolbar no-print">
+            <button class="btn btn-outline btn-sm" onclick="go('complaints')">Back</button>
+            <button class="btn btn-navy btn-sm" onclick="window.print()">Print Record</button>
+            ${isAdmin() ? '<button class="btn btn-danger btn-sm" id="del-c">Delete Record</button>' : ''}
+          </div>
+          <h1 class="page-title">${esc(c.ticket_number)}</h1>
+          <div class="grid-2">
+            <div class="card">
+              <h3 class="serif" style="margin-top:0">Complaint Details</h3>
+              <p><b>Date received:</b> ${esc(String(c.date_received).slice(0,10))}<br>
+              <b>Subject:</b> ${esc(c.subject)}<br>
+              <b>Category:</b> ${esc(c.category)} ${c.category_confidence ? '(' + Math.round(c.category_confidence * 100) + '% suggested)' : ''}<br>
+              <b>Nature of call:</b> ${esc(c.nature_of_call || '—')}<br>
+              <b>Complainant:</b> ${esc(c.complainant_name || '—')}<br>
+              <b>Location:</b> ${esc(c.complainant_location)}<br>
+              <b>Current status:</b> ${badge(c.status)}</p>
+            </div>
+            <div class="card">
+              <h3 class="serif" style="margin-top:0">Processing Timeline</h3>
+              <div class="timeline">${(c.timeline || []).map((t) => `<div class="tl-item"><b>${esc(t.type)}</b><span class="hint">${esc(fmt(t.at))} · ${esc(t.user || '')}</span><div>${esc(t.description)}</div></div>`).join('') || 'No events yet.'}</div>
+            </div>
+          </div>
+          <div class="card docs" style="margin-top:14px">
+            <h3 class="serif" style="margin-top:0">Attached Documents</h3>
+            ${(c.attachments || []).length ? `<table><thead><tr><th>Type</th><th>File</th><th>Uploaded</th><th class="no-print"></th></tr></thead><tbody>
+              ${(c.attachments || []).map((a) => `<tr><td>${esc(a.document_type)}</td><td><a href="${esc(a.file_url || '#')}" target="_blank">${esc(a.file_name)}</a></td><td>${esc(fmt(a.created_at))}</td><td class="no-print">${isAdmin() && a.file_id && a.file_id !== 'seed' ? `<button class="btn btn-danger btn-sm del-att" data-id="${esc(a.id)}" data-file="${esc(a.file_id)}">Delete</button>` : ''}</td></tr>`).join('')}
+            </tbody></table>` : '<p>No attachments yet.</p>'}
+            ${write ? `<div class="toolbar" style="margin-top:12px">
+              <div class="field"><label>Document type</label><select id="att-type">${options(L.docTypes)}</select></div>
+              <div class="field"><label>File</label><input id="att-file" type="file" accept=".pdf,.doc,.docx,image/*"></div>
+              <button class="btn btn-navy btn-sm" id="att-up" data-label="Upload">Upload</button>
+            </div>` : ''}
+          </div>
+          ${write ? workflowForms(c, L) : ''}
+          <p class="hint" style="margin-top:18px">Prepared By: ${esc(state.user.name)} · ${esc(state.user.role)}</p>
+        `;
+        if ($('del-c')) $('del-c').onclick = async () => {
+          if (await confirmModal('Delete complaint', 'This will delete the record, timeline, and Drive files for ' + c.ticket_number + '.')) {
+            await api('deleteComplaint', { id: c.id });
+            toast('Record deleted.');
+            go('complaints');
+          }
+        };
+        document.querySelectorAll('.del-att').forEach((b) => b.onclick = async () => {
+          if (await confirmModal('Delete attachment', 'Only Administrators can delete attachments. Continue?')) {
+            await api('deleteAttachment', { complaint_id: c.id, attachment_id: b.dataset.id, file_id: b.dataset.file });
+            toast('Attachment deleted.');
+            renderComplaintView();
+          }
+        });
+        if ($('att-up')) $('att-up').onclick = async () => {
+          setBusy($('att-up'), true);
+          try {
+            const file = await fileToPayload($('att-file').files[0]);
+            if (!file) throw new Error('Choose a file.');
+            await api('uploadAttachment', { complaint_id: c.id, document_type: $('att-type').value, file });
+            toast('Document uploaded.');
+            renderComplaintView();
+          } catch (err) { toast(err.message); }
+          finally { setBusy($('att-up'), false, 'Upload'); }
+        };
+        bindWorkflow(c);
+      } catch (err) {
+        $('content').innerHTML = '<p class="error">' + esc(err.message) + '</p>';
+      }
+    }
+
+    function workflowForms(c, L) {
+      return `
+        <div class="grid-2" style="margin-top:14px">
+          <div class="card">
+            <h3 class="serif" style="margin-top:0">RD Action Slip Approval</h3>
+            <div class="field"><label>Date Signed by RD *</label><input id="rd-date" type="date" value="${esc(String(c.date_signed_rd || '').slice(0,10))}"></div>
+            <div class="field"><label>Signed Action Slip Document *</label><input id="rd-file" type="file" accept=".pdf,.doc,.docx,image/*"></div>
+            <button class="btn btn-navy btn-sm" id="rd-save" data-label="Save Action Slip">Save Action Slip</button>
+          </div>
+          <div class="card">
+            <h3 class="serif" style="margin-top:0">Endorsement Tracking</h3>
+            <p class="hint">Endorsement is blocked until RD date and signed Action Slip are present.</p>
+            <div class="field"><label>Endorsed To *</label><select id="en-to">${options(L.fieldOffices, c.endorsed_to)}</select></div>
+            <div class="field"><label>Mode *</label><select id="en-mode">${options(L.endorsementModes, c.mode)}</select></div>
+            <div class="field"><label>Date and Time Endorsed *</label><input id="en-date" type="datetime-local" value="${esc(toLocal(c.date_endorsed))}"></div>
+            <button class="btn btn-navy btn-sm" id="en-save" data-label="Save Endorsement">Save Endorsement</button>
+            <hr>
+            <div class="field"><label>Date and Time Received *</label><input id="rc-date" type="datetime-local" value="${esc(toLocal(c.date_received_fo))}"></div>
+            <div class="field"><label>Received By *</label><input id="rc-by" value="${esc(c.received_by || '')}"></div>
+            <button class="btn btn-outline btn-sm" id="rc-save" data-label="Mark Received">Mark Received</button>
+          </div>
+          <div class="card">
+            <h3 class="serif" style="margin-top:0">24-Hour Response Monitoring</h3>
+            <p><b>Deadline:</b> ${esc(fmt(c.deadline))}<br><b>Compliance:</b> ${badge(c.compliance_status || '—')}</p>
+            <div class="field"><label>Reply Received Date and Time *</label><input id="rp-date" type="datetime-local" value="${esc(toLocal(c.reply_date))}"></div>
+            <div class="field"><label>Reply Document *</label><input id="rp-file" type="file" accept=".pdf,.doc,.docx,image/*"></div>
+            <button class="btn btn-navy btn-sm" id="rp-save" data-label="Save Reply">Save Reply</button>
+          </div>
+          <div class="card">
+            <h3 class="serif" style="margin-top:0">HRDS Action Taken</h3>
+            <div class="field"><label>Date Forwarded to HRDS *</label><input id="h-date" type="date" value="${esc(String(c.date_forwarded || '').slice(0,10))}"></div>
+            <div class="field"><label>Action Taken / Remarks *</label><textarea id="h-rem">${esc(c.hrds_remarks || '')}</textarea></div>
+            <div class="field"><label>Supporting Document</label><input id="h-file" type="file" accept=".pdf,.doc,.docx,image/*"></div>
+            <div class="field"><label>Final Status *</label><select id="h-final">${options(L.finalStatuses, c.final_status)}</select></div>
+            <button class="btn btn-navy btn-sm" id="h-save" data-label="Save HRDS Action">Save HRDS Action</button>
+          </div>
+        </div>`;
+    }
+
+    function toLocal(v) {
+      if (!v) return '';
+      return String(v).slice(0, 16);
+    }
+
+    function bindWorkflow(c) {
+      const save = (id, fn) => {
+        const btn = $(id);
+        if (!btn) return;
+        btn.onclick = async () => {
+          setBusy(btn, true);
+          try { await fn(); toast('Saved.'); renderComplaintView(); }
+          catch (err) { toast(err.message); }
+          finally { setBusy(btn, false, btn.dataset.label); }
+        };
+      };
+      save('rd-save', async () => api('saveActionSlip', { complaint_id: c.id, date_signed_rd: $('rd-date').value, file: await fileToPayload($('rd-file').files[0]) }));
+      save('en-save', async () => api('saveEndorsement', { complaint_id: c.id, endorsed_to: $('en-to').value, mode: $('en-mode').value, date_endorsed: $('en-date').value }));
+      save('rc-save', async () => api('markReceived', { complaint_id: c.id, date_received: $('rc-date').value, received_by: $('rc-by').value }));
+      save('rp-save', async () => api('saveReply', { complaint_id: c.id, reply_date: $('rp-date').value, file: await fileToPayload($('rp-file').files[0]) }));
+      save('h-save', async () => api('saveHrds', { complaint_id: c.id, date_forwarded: $('h-date').value, remarks: $('h-rem').value, final_status: $('h-final').value, file: await fileToPayload($('h-file').files[0]) }));
+    }
+
+    async function renderQueue(kind) {
+      const titles = { 'action-slip': 'RD Action Slip Approval', endorsements: 'Endorsement Tracking', monitoring: '24-Hour Response Monitoring', hrds: 'HRDS Action Taken' };
+      $('content').innerHTML = `<h1 class="page-title">${titles[kind]}</h1><div class="card">Loading…</div>`;
+      const data = await api('listComplaints', {});
+      let items = data.items;
+      if (kind === 'action-slip') items = items.filter((c) => /Pending RD|Received/.test(c.status));
+      if (kind === 'endorsements') items = items.filter((c) => c.status === 'RD Approved' || (c.status === 'Endorsed' && !c.date_received_fo));
+      if (kind === 'monitoring') items = items.filter((c) => c.date_received_fo && /Pending Reply|Within 24|Delayed|Endorsed/.test(c.status));
+      if (kind === 'hrds') items = items.filter((c) => /Within 24|Delayed|Forwarded|Completed|Requires/.test(c.status));
+      $('content').innerHTML = `<h1 class="page-title">${titles[kind]}</h1>` + tableHtml(items);
+      bindTable(items);
+    }
+
+    async function renderDocuments() {
+      $('content').innerHTML = '<h1 class="page-title">Document Management</h1>' + filterBar();
+      const load = async () => {
+        const data = await api('listComplaints', filters());
+        const rows = [];
+        data.items.forEach((c) => (c.attachments || []).forEach((a) => rows.push({ ticket: c.ticket_number, id: c.id, a })));
+        const html = rows.length ? `<div class="card" style="overflow:auto"><table><thead><tr><th>Ticket</th><th>Type</th><th>File</th><th>Uploaded by</th><th></th></tr></thead><tbody>
+          ${rows.map((r) => `<tr><td><a href="javascript:void(0)" onclick="go('complaint-view','${esc(r.id)}')">${esc(r.ticket)}</a></td>
+            <td>${esc(r.a.document_type)}</td><td><a href="${esc(r.a.file_url || '#')}" target="_blank">${esc(r.a.file_name)}</a>
+            ${r.a.download_url ? ` · <a href="${esc(r.a.download_url)}" target="_blank">Download</a>` : ''}</td>
+            <td>${esc(r.a.uploaded_by || '')}</td>
+            <td>${isAdmin() && r.a.file_id && r.a.file_id !== 'seed' ? `<button class="btn btn-danger btn-sm del-att" data-cid="${esc(r.id)}" data-id="${esc(r.a.id)}" data-file="${esc(r.a.file_id)}">Delete</button>` : ''}</td></tr>`).join('')}
+        </tbody></table></div>` : '<div class="card">No documents found.</div>';
+        const old = $('content').querySelector('.card');
+        if (old && old.querySelector('table, p, :scope')) {
+          const cards = $('content').querySelectorAll('.card');
+          if (cards[1]) cards[1].remove();
+        }
+        $('content').insertAdjacentHTML('beforeend', html);
+        document.querySelectorAll('.del-att').forEach((b) => b.onclick = async () => {
+          if (await confirmModal('Delete attachment', 'Delete this file from Drive and the ticket record?')) {
+            await api('deleteAttachment', { complaint_id: b.dataset.cid, attachment_id: b.dataset.id, file_id: b.dataset.file });
+            toast('Deleted.');
+            renderDocuments();
+          }
+        });
+      };
+      $('f-go').onclick = load;
+      await load();
+    }
+
+    async function renderReports() {
+      const L = state.lookups || {};
+      $('content').innerHTML = `<h1 class="page-title">Monthly Reporting</h1>
+        <div class="toolbar no-print">
+          <div class="field"><label>Month</label><input id="f-month" type="month"></div>
+          <div class="field"><label>Category</label><select id="f-cat">${options(L.categories)}</select></div>
+          <div class="field"><label>Status</label><select id="f-status">${options(['Pending RD Approval','RD Approved','Endorsed','Pending Reply','Within 24 Hours','Delayed','Forwarded to HRDS','Completed','Requires Further Action'])}</select></div>
+          <div class="field"><label>Field Office</label><select id="f-office">${options(L.fieldOffices)}</select></div>
+          <button class="btn btn-navy btn-sm" id="f-go">Generate</button>
+          <button class="btn btn-outline btn-sm" onclick="window.print()">Print</button>
+        </div>
+        <div id="report-out" class="card">Select a period and generate the report.</div>`;
+      $('f-go').onclick = async () => {
+        const r = await api('reports', filters());
+        $('report-out').innerHTML = `
+          <div class="print-header" style="display:block;text-align:center">
+            <b>Republic of the Philippines</b><br>Department of Labor and Employment — Regional Office<br>
+            Human Resource Development Section (HRDS)<br>
+            <h2>8888 Monthly Summary Report</h2>
+            <div>Reporting period: ${esc(r.period)} · Generated ${esc(fmt(r.generatedAt))}</div>
+          </div>
+          <p><b>Total complaints:</b> ${r.total}</p>
+          <h3 class="serif">Complaint Category Summary</h3>
+          <table><thead><tr><th>Category</th><th>Total Count</th><th>Percentage</th></tr></thead>
+          <tbody>${r.categorySummary.map((x) => `<tr><td>${esc(x.category)}</td><td>${x.count}</td><td>${x.percentage}%</td></tr>`).join('')}</tbody></table>
+          <p class="hint">Percentage = (Category Count / Total Complaints) × 100</p>
+          <h3 class="serif">Status Report</h3>
+          <table><thead><tr><th>Status</th><th>Count</th><th>Percentage</th></tr></thead>
+          <tbody>${r.statusSummary.map((x) => `<tr><td>${esc(x.status)}</td><td>${x.count}</td><td>${x.percentage}%</td></tr>`).join('')}</tbody></table>
+          <h3 class="serif">Field Office Distribution</h3>
+          <table><thead><tr><th>Office / Unit</th><th>Count</th><th>Percentage</th></tr></thead>
+          <tbody>${r.officeSummary.map((x) => `<tr><td>${esc(x.office)}</td><td>${x.count}</td><td>${x.percentage}%</td></tr>`).join('')}</tbody></table>
+          <p style="margin-top:28px"><b>Prepared By:</b><br><br>_________________________________<br>${esc(state.user.name)}<br>${esc(state.user.role)}<br>Date: ${esc(new Date().toISOString().slice(0,10))}</p>`;
+      };
+    }
+
+    async function renderUsers() {
+      if (!isAdmin()) { $('content').innerHTML = '<p class="error">Administrators only.</p>'; return; }
+      const data = await api('listUsers');
+      $('content').innerHTML = `<h1 class="page-title">User Management</h1>
+        <div class="card">
+          <div class="grid-3">
+            <div class="field"><label>Name</label><input id="u-name"></div>
+            <div class="field"><label>Username</label><input id="u-user"></div>
+            <div class="field"><label>Password</label><input id="u-pass" type="password"></div>
+            <div class="field"><label>Role</label><select id="u-role">${options((state.lookups || {}).roles)}</select></div>
+          </div>
+          <input type="hidden" id="u-id">
+          <button class="btn btn-navy btn-sm" id="u-save" data-label="Save User">Save User</button>
+        </div>
+        <div class="card" style="margin-top:14px;overflow:auto"><table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th></th></tr></thead><tbody>
+          ${data.items.map((u) => `<tr><td>${esc(u.name)}</td><td>${esc(u.username)}</td><td>${esc(u.role)}</td>
+            <td><button class="btn btn-outline btn-sm ed-u" data-id="${esc(u.id)}" data-name="${esc(u.name)}" data-username="${esc(u.username)}" data-role="${esc(u.role)}">Edit</button>
+            <button class="btn btn-danger btn-sm del-u" data-id="${esc(u.id)}">Delete</button></td></tr>`).join('')}
+        </tbody></table></div>`;
+      $('u-save').onclick = async () => {
+        setBusy($('u-save'), true);
+        try {
+          await api('saveUser', { id: $('u-id').value, name: $('u-name').value, username: $('u-user').value, password: $('u-pass').value, role: $('u-role').value });
+          toast('User saved.');
+          renderUsers();
+        } catch (err) { toast(err.message); }
+        finally { setBusy($('u-save'), false, 'Save User'); }
+      };
+      document.querySelectorAll('.ed-u').forEach((b) => b.onclick = () => {
+        $('u-id').value = b.dataset.id; $('u-name').value = b.dataset.name; $('u-user').value = b.dataset.username; $('u-role').value = b.dataset.role;
+      });
+      document.querySelectorAll('.del-u').forEach((b) => b.onclick = async () => {
+        if (await confirmModal('Delete user', 'Remove this account?')) {
+          await api('deleteUser', { id: b.dataset.id });
+          renderUsers();
+        }
+      });
+    }
+
+    window.go = go;
+
+    (async function boot() {
+      if (state.token && state.user) {
+        try {
+          const me = await api('me');
+          state.user = me.user;
+          state.lookups = me.lookups;
+          showApp();
+          return;
+        } catch (e) {
+          sessionStorage.clear();
+        }
+      }
+    })();
+  </script>
+</body>
+</html>
