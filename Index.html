@@ -2711,9 +2711,11 @@
               <input id="crewEmployeeRole" required placeholder="Shooter / Technician / Crew">
             </label>
             <label>Employee Type
-              <select id="crewEmployeeType">
+              <select id="crewEmployeeType" onchange="updateCrewSalaryMode()">
                 <option>Regular</option>
                 <option>On Call</option>
+                <option>Owner</option>
+                <option>Head Tech</option>
               </select>
             </label>
             <label>Contact Number
@@ -2750,8 +2752,9 @@
     }
 
     const salaryInput = document.getElementById('crewEmployeeSalary');
-    if(salaryInput && !percentageMode){
+    if(salaryInput){
       salaryInput.addEventListener('input', function(){
+        if(salaryInput.disabled) return;
         const payPreview = document.getElementById('crewEmployeePayPreview');
         const display = document.getElementById('crewEmployeePayDisplay');
         const value = Number(salaryInput.value || 0);
@@ -2759,6 +2762,44 @@
         if(display) display.value = money(value);
       });
     }
+  }
+
+  /**
+   * Owner and Head Tech pay must always be a manual entry, never the
+   * automatic 5% calculation that otherwise kicks in once the booking
+   * amount exceeds ₱60,000 for other employee types. Re-evaluated whenever
+   * Employee Type changes so switching to/from Owner or Head Tech
+   * immediately unlocks/relocks the Salary field.
+   */
+  function updateCrewSalaryMode(){
+    const typeSelect=document.getElementById('crewEmployeeType');
+    const salaryInput=document.getElementById('crewEmployeeSalary');
+    const hint=document.getElementById('crewSalaryHint');
+    const payDisplay=document.getElementById('crewEmployeePayDisplay');
+    const payPreview=document.getElementById('crewEmployeePayPreview');
+    if(!typeSelect || !salaryInput) return;
+
+    const booking=window.currentShowBooking || {};
+    const total=Number(booking['Final Amount'] || booking['Total Amount Due'] || booking['Total Amount'] || 0);
+    const automaticPay=total * 0.05;
+    const isExemptType=typeSelect.value==='Owner' || typeSelect.value==='Head Tech';
+    const useAutoPercentage=total > 60000 && !isExemptType;
+
+    salaryInput.disabled=useAutoPercentage;
+    salaryInput.readOnly=useAutoPercentage;
+
+    if(useAutoPercentage){
+      salaryInput.value=automaticPay;
+      if(hint) hint.textContent='Automatically computed at 5% because the booking amount is above ₱60,000.';
+    } else if(isExemptType && total > 60000){
+      if(hint) hint.textContent='Owner and Head Tech pay is always entered manually, regardless of the booking amount.';
+    } else {
+      if(hint) hint.textContent='Editable because the booking amount is ₱60,000 or below.';
+    }
+
+    const value=Number(salaryInput.value || 0);
+    if(payDisplay) payDisplay.value=useAutoPercentage ? money(automaticPay) : money(value);
+    if(payPreview) payPreview.textContent=useAutoPercentage ? (money(automaticPay)+' (5%)') : (money(value)+' (Manual)');
   }
 
   function submitAssignEmployee(e){
@@ -3647,6 +3688,8 @@
               <select id="employeeType">
                 <option ${employee['Employee Type'] === 'Regular' || !employee['Employee Type'] ? 'selected' : ''}>Regular</option>
                 <option ${employee['Employee Type'] === 'On Call' ? 'selected' : ''}>On Call</option>
+                <option ${employee['Employee Type'] === 'Owner' ? 'selected' : ''}>Owner</option>
+                <option ${employee['Employee Type'] === 'Head Tech' ? 'selected' : ''}>Head Tech</option>
               </select>
             </label>
             <label>Contact Number

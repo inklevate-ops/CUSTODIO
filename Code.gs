@@ -1504,7 +1504,9 @@ function saveEmployee(token, payload) {
 
   const name = String(payload.name || '').trim();
   const role = String(payload.role || '').trim();
-  const type = String(payload.type || 'Regular').trim() === 'On Call' ? 'On Call' : 'Regular';
+  const type = ['On Call', 'Owner', 'Head Tech'].indexOf(String(payload.type || '').trim()) !== -1
+    ? String(payload.type).trim()
+    : 'Regular';
   const contact = String(payload.contact || '').trim();
   const salary = Math.max(0, number_(payload.salary));
   const status = String(payload.status || 'Active').trim() === 'Inactive' ? 'Inactive' : 'Active';
@@ -1583,8 +1585,8 @@ function assignEmployeeToShow(token, payload) {
   const bookingId = String(payload.bookingId || '').trim();
   const name = String(payload.employeeName || payload.name || '').trim();
   const role = String(payload.role || '').trim();
-  const type = String(payload.employeeType || 'Regular').trim() === 'On Call'
-    ? 'On Call'
+  const type = ['On Call', 'Owner', 'Head Tech'].indexOf(String(payload.employeeType || '').trim()) !== -1
+    ? String(payload.employeeType).trim()
     : 'Regular';
   const contact = String(payload.contact || '').trim();
   const salaryInput = Math.max(0, number_(payload.salary));
@@ -1606,7 +1608,11 @@ function assignEmployeeToShow(token, payload) {
     0
   ));
 
-  const percentageMode = showTotal > 60000;
+  // Owner and Head Tech pay is always a manual entry, never the automatic
+  // 5% calculation that otherwise applies once the booking amount exceeds
+  // ₱60,000 for other employee types.
+  const isExemptFromPercentagePay = type === 'Owner' || type === 'Head Tech';
+  const percentageMode = showTotal > 60000 && !isExemptFromPercentagePay;
   const payRate = 5;
   const pay = percentageMode
     ? showTotal * payRate / 100
@@ -1947,6 +1953,12 @@ function getPayrollSummary(token, payrollPeriod) {
     const employeeCrews = crewByEmployee.get(employeeId) || [];
     const showBreakdown = [];
 
+    // Owner and Head Tech pay is always manual, never the automatic 5%
+    // calculation that otherwise applies once a show's booking amount
+    // exceeds ₱60,000 for other employee types.
+    const employeeType = String(employee['Employee Type'] || 'Regular');
+    const isExemptFromPercentagePay = employeeType === 'Owner' || employeeType === 'Head Tech';
+
     employeeCrews.forEach(c => {
       const booking = bookingMap.get(String(c.BookingID || '').trim());
       if (!booking) return;
@@ -1968,7 +1980,8 @@ function getPayrollSummary(token, payrollPeriod) {
 
       const manualPay = number_(c.Pay ?? c['Show Pay'] ?? 0);
       const configuredRate = number_(c['Pay Rate'] ?? 5) || 5;
-      const pay = showTotal > 60000
+      const usesPercentagePay = showTotal > 60000 && !isExemptFromPercentagePay;
+      const pay = usesPercentagePay
         ? showTotal * configuredRate / 100
         : manualPay;
 
@@ -1978,7 +1991,7 @@ function getPayrollSummary(token, payrollPeriod) {
         eventDate:eventDate,
         bookingAmount:showTotal,
         pay:pay,
-        payMode:showTotal > 60000 ? '5% Automatic' : 'Manual'
+        payMode:usesPercentagePay ? '5% Automatic' : 'Manual'
       });
     });
 
