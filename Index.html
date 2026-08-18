@@ -4650,7 +4650,9 @@
                   <td>${esc(formatDate(l['Due Date']))}</td>
                   <td>${esc(l.Purpose||'—')}</td>
                   <td>
-                    <button class="table-action" onclick='recordLoanPaymentUI(${JSON.stringify(l).replace(/'/g,"&#39;")})'>Pay</button>
+                    ${Number(l['Outstanding Balance']||0)>0
+                      ? `<button class="table-action" onclick='recordLoanPaymentUI(${JSON.stringify(l).replace(/'/g,"&#39;")})'>Pay</button>`
+                      : `<span class="badge">Paid</span>`}
                     <button class="table-action" onclick="openLoanPaymentHistory('${esc(l.ID||l.LoanID||'')}')">History</button>
                     <button class="table-action danger-text" onclick="confirmDeleteLoanModule('${esc(l.ID||l.LoanID||'')}')">Delete</button>
                   </td>
@@ -4799,7 +4801,7 @@
         <form onsubmit="submitLoanPayment(event,'${esc(loan.ID)}')">
           <div class="form-grid">
             <label>Payment Amount<input id="loanPaymentAmount" type="number" min="0.01" step="0.01" max="${esc(loan['Outstanding Balance'])}" required></label>
-            <label>Payment Date<input id="loanPaymentDate" type="date"></label>
+            <label>Payment Date<input id="loanPaymentDate" type="date" value="${new Date().toISOString().slice(0,10)}" disabled readonly></label>
             <label>Method<input id="loanPaymentMethod" placeholder="Cash / GCash / Bank"></label>
           </div>
           <div class="dialog-actions">
