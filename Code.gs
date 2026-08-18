@@ -285,15 +285,41 @@ function getDashboard(token) {
       : sum;
   }, 0);
 
-  // Match the Payroll module's "Gross Show Pay" figure exactly, instead of
-  // only counting payroll runs that have already been Processed (saved to
-  // the Payroll sheet) - getPayrollSummary computes gross pay directly from
-  // crew assignments for the period, which is what the Payroll module shows
-  // regardless of whether anything has been processed yet this month.
-  const payrollSummaryForMonth = getPayrollSummary(token, monthKey);
-  const monthlyPayroll = (payrollSummaryForMonth && payrollSummaryForMonth.ok)
-    ? number_(payrollSummaryForMonth.totals.gross)
-    : 0;
+  // Match the Payroll module's "Gross Show Pay" figure for the current month,
+  // computed directly from crew assignments (the same formula
+  // getPayrollSummary uses) instead of calling that function itself, which
+  // does 5 separate sheet reads plus per-employee/advance calculations the
+  // Dashboard doesn't need. Calling the full function here made every single
+  // Dashboard load noticeably heavier, and repeated/overlapping Dashboard
+  // loads compounded into serious backend congestion.
+  const bookingMapForPayroll = new Map();
+  bookings.forEach(b => {
+    const bId = String(b.ID || b.BookingID || '').trim();
+    if (bId) bookingMapForPayroll.set(bId, b);
+  });
+
+  const monthlyPayroll = getOrEmpty_('BookingCrew').reduce((sum, c) => {
+    const crewBooking = bookingMapForPayroll.get(String(c.BookingID || '').trim());
+    if (!crewBooking) return sum;
+    if (String(crewBooking['Booking Status'] || 'Booked') === 'Cancelled') return sum;
+
+    const eventDate = toDate_(crewBooking['Event Date']);
+    if (!eventDate || Utilities.formatDate(eventDate, Session.getScriptTimeZone(), 'yyyy-MM') !== monthKey) {
+      return sum;
+    }
+
+    const crewShowTotal = number_(
+      crewBooking['Final Amount'] ??
+      crewBooking['Total Amount Due'] ??
+      crewBooking['Total Amount'] ??
+      crewBooking.Subtotal ??
+      0
+    );
+    const manualPay = number_(c.Pay ?? c['Show Pay'] ?? 0);
+    const configuredRate = number_(c['Pay Rate'] ?? 5) || 5;
+    const pay = crewShowTotal > 60000 ? crewShowTotal * configuredRate / 100 : manualPay;
+    return sum + pay;
+  }, 0);
 
   // Count unique clients with at least one non-cancelled booking.
   // Multiple active shows for the same client count as one client.
