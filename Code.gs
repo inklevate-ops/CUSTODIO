@@ -1974,7 +1974,18 @@ function getPayrollSummary(token, payrollPeriod) {
       outstanding:rows.reduce((s,r) => s + number_(r['Advance / Loan Outstanding']), 0),
       employees:rows.length,
       processed:rows.filter(r => r.Processed).length
-    }
+    },
+    // TEMPORARY diagnostic data - remove once the Processed-status matching
+    // issue is confirmed fixed. Shows the raw column names and values
+    // actually being read from the Payroll sheet.
+    _debugPayrollRowKeys: payrollRows.length ? Object.keys(payrollRows[0]) : [],
+    _debugPayrollRows: payrollRows.map(function(p){
+      return {
+        EmployeeID: p.EmployeeID,
+        PayrollPeriodValue: p['Payroll Period'],
+        PayrollPeriodType: typeof p['Payroll Period']
+      };
+    })
   });
 }
 
