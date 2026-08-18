@@ -204,7 +204,6 @@ function getDashboard(token) {
   const inventory = getOrEmpty_('Inventory');
   const payments = getOrEmpty_('Payments');
   const expenses = getOrEmpty_('Expenses');
-  const payroll = getOrEmpty_('Payroll');
 
   // Cancelled bookings are retained in the database for audit/history,
   // but are excluded from operational totals and client/show overview metrics.
@@ -286,12 +285,15 @@ function getDashboard(token) {
       : sum;
   }, 0);
 
-  const monthlyPayroll = payroll.reduce((sum, p) => {
-    const d = toDate_(p['Payment Date']);
-    return d && Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM') === monthKey
-      ? sum + number_(p['Net Salary'])
-      : sum;
-  }, 0);
+  // Match the Payroll module's "Gross Show Pay" figure exactly, instead of
+  // only counting payroll runs that have already been Processed (saved to
+  // the Payroll sheet) - getPayrollSummary computes gross pay directly from
+  // crew assignments for the period, which is what the Payroll module shows
+  // regardless of whether anything has been processed yet this month.
+  const payrollSummaryForMonth = getPayrollSummary(token, monthKey);
+  const monthlyPayroll = (payrollSummaryForMonth && payrollSummaryForMonth.ok)
+    ? number_(payrollSummaryForMonth.totals.gross)
+    : 0;
 
   // Count unique clients with at least one non-cancelled booking.
   // Multiple active shows for the same client count as one client.
