@@ -481,6 +481,7 @@
 
     .pending-client-panel{padding:16px}.pending-toolbar{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px}.pending-badge{color:#e9b95e;background:rgba(215,173,85,.12)}
     .void-warning{padding:12px 14px;border:1px solid #6d3838;background:rgba(180,60,60,.1);color:#ff9e9e;border-radius:12px;font-size:12px;margin-bottom:14px}
+    .text-positive{color:#78d499}.text-negative{color:#e8a0a0}
     .input-suffix{display:flex;align-items:center;background:#0c0c0c;border:1px solid #2a2a2a;border-radius:10px;padding:0 11px}
     .input-suffix input{border:0!important;background:transparent!important;padding:10px 0!important;flex:1 1 auto;min-width:0;color:#eee!important;outline:none!important;box-shadow:none!important}
     .input-suffix span{color:#888;font-size:12px;font-weight:700;flex:0 0 auto;padding-left:6px}
@@ -4783,6 +4784,22 @@
     }).getProducts(state.token);
   }
 
+  /**
+   * Read-only profit metrics derived from the existing Capital/Cost Price
+   * (Unit Cost, falling back to Purchase Cost - the same fallback already
+   * used everywhere else in this file, e.g. Client/Shows usage costing) and
+   * Retail Price (Selling Price). This never writes back to the product
+   * record or changes those source values; it only computes display figures.
+   */
+  function computeProductProfitMetrics(p){
+    const cost=Number(p['Unit Cost'] ?? p['Purchase Cost'] ?? 0);
+    const price=Number(p['Selling Price'] ?? 0);
+    const profitAmount=price-cost;
+    const markupPct=cost>0 ? (profitAmount/cost*100) : 0;
+    const marginPct=price>0 ? (profitAmount/price*100) : 0;
+    return {profitAmount:profitAmount, markupPct:markupPct, marginPct:marginPct};
+  }
+
   function renderProductTable(){
     const panel=document.getElementById('productPanel');
     if(!panel)return;
@@ -4792,19 +4809,26 @@
         <div><div class="panel-title">${productSourceFilter} Products</div><div class="panel-subtitle">${rows.length} product${rows.length===1?'':'s'}</div></div>
       </div>
       <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>Product</th><th>Category</th><th>Unit</th><th>Product Cost</th><th>Unit Cost</th><th>Selling Price</th><th>Minimum Stock</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Product</th><th>Category</th><th>Unit</th><th>Product Cost</th><th>Unit Cost</th><th>Selling Price</th><th>Profit Amount</th><th>Markup %</th><th>Profit Margin %</th><th>Minimum Stock</th><th>Status</th><th></th></tr></thead>
         <tbody>
-          ${rows.length?rows.map(p=>`<tr>
+          ${rows.length?rows.map(p=>{
+            const metrics=computeProductProfitMetrics(p);
+            const trendClass=metrics.profitAmount<0?'text-negative':'text-positive';
+            return `<tr>
             <td><strong>${esc(p.Name)}</strong></td>
             <td>${esc(p.Category)}</td>
             <td>${esc(p.Unit)}</td>
             <td>${money(p['Purchase Cost'])}</td>
             <td>${money(p['Unit Cost'] ?? p['Purchase Cost'] ?? 0)}</td>
             <td>${money(p['Selling Price'])}</td>
+            <td><strong class="${trendClass}">${money(metrics.profitAmount)}</strong></td>
+            <td class="${trendClass}">${pct(metrics.markupPct)}</td>
+            <td class="${trendClass}">${pct(metrics.marginPct)}</td>
             <td>${esc(p['Minimum Stock']||0)}</td>
             <td><span class="badge">${esc(p.Status||'Active')}</span></td>
             <td><button class="table-action" onclick='editProduct(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Edit</button></td>
-          </tr>`).join(''):`<tr><td colspan="9"><div class="empty-state">No ${productSourceFilter.toLowerCase()} products yet.</div></td></tr>`}
+          </tr>`;
+          }).join(''):`<tr><td colspan="12"><div class="empty-state">No ${productSourceFilter.toLowerCase()} products yet.</div></td></tr>`}
         </tbody>
       </table></div>
     </div>`;
