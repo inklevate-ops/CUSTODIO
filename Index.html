@@ -4069,9 +4069,9 @@
     const stats=document.getElementById('expensesStats');
     if(stats) stats.innerHTML=`${uiStat('Total Expenses',money(total))}${uiStat('Transactions',rows.length)}`;
     const isFiltered=!!search||!!month;
-    box.innerHTML=rows.length?`<div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Booking</th><th>Client</th><th>Category</th><th>Description</th><th>Amount</th><th>Action</th></tr></thead><tbody>${rows.map(function(e){
+    box.innerHTML=rows.length?`<div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Booking</th><th>Client</th><th>Category</th><th>Amount</th><th>Action</th></tr></thead><tbody>${rows.map(function(e){
       const eid=esc(e.ID||e.ExpenseID||'');
-      return `<tr><td>${esc(formatDate(e.Date))}</td><td>${esc(e.BookingID||'—')}</td><td>${esc(e.ClientName||'—')}</td><td>${esc(e.Category||'Other')}</td><td>${esc(e.Description||'')}</td><td>${money(e.Amount||0)}</td><td><button class="table-action danger-text" onclick="confirmDeleteExpenseModule('${eid}')">Delete</button></td></tr>`;
+      return `<tr><td>${esc(formatDate(e.Date))}</td><td>${esc(e.BookingID||'—')}</td><td>${esc(e.ClientName||'—')}</td><td>${esc(e.Category||'Other')}</td><td>${money(e.Amount||0)}</td><td><button class="table-action danger-text" onclick="confirmDeleteExpenseModule('${eid}')">Delete</button></td></tr>`;
     }).join('')}</tbody></table></div></div>`:`<div class="panel"><div class="empty-state">${isFiltered?'No expenses found for the selected filters.':'No expenses recorded.'}</div></div>`;
   }
 
