@@ -4325,7 +4325,8 @@
   }
 
   function uiReports(){
-    return uiHeader('Reports','Sales, bookings, payments, inventory, expenses, payroll and profit','<button class="btn" onclick="loadReports(currentReportTab)">Refresh</button>')+
+    return uiHeader('Reports','Sales, bookings, payments, inventory, expenses, payroll and profit',
+      '<div class="table-actions"><button class="btn" onclick="printCurrentReport()">Print</button><button class="btn" onclick="exportCurrentReportCSV()">Export CSV</button><button class="btn" onclick="loadReports(currentReportTab)">Refresh</button></div>')+
       `<div class="report-tabs">
         <button class="filter-btn active" id="reportTab_sales" onclick="setReportTab('sales')">Sales</button>
         <button class="filter-btn" id="reportTab_bookings" onclick="setReportTab('bookings')">Bookings</button>
@@ -4335,10 +4336,33 @@
         <button class="filter-btn" id="reportTab_payroll" onclick="setReportTab('payroll')">Payroll</button>
         <button class="filter-btn" id="reportTab_profit" onclick="setReportTab('profit')">Profit</button>
       </div>
+      <div class="panel" id="reportsDateFilterPanel">
+        <div class="pending-toolbar">
+          <div>
+            <div class="panel-title">Date Filter</div>
+            <div class="panel-subtitle">Scopes the table, totals, export and print to the selected period.</div>
+          </div>
+          <div class="payments-toolbar-filters">
+            <button class="filter-btn active" id="reportsDate_all" onclick="setReportsDateFilter('all')">All Time</button>
+            <button class="filter-btn" id="reportsDate_today" onclick="setReportsDateFilter('today')">Today</button>
+            <button class="filter-btn" id="reportsDate_week" onclick="setReportsDateFilter('week')">This Week</button>
+            <button class="filter-btn" id="reportsDate_month" onclick="setReportsDateFilter('month')">This Month</button>
+            <button class="filter-btn" id="reportsDate_year" onclick="setReportsDateFilter('year')">This Year</button>
+            <button class="filter-btn" id="reportsDate_custom" onclick="setReportsDateFilter('custom')">Custom</button>
+          </div>
+        </div>
+        <div id="reportsCustomDateRow" class="form-grid" style="display:none;margin:12px 0 0;">
+          <label>From<input id="reportsCustomFrom" type="date" onchange="updateReportsCustomDates()"></label>
+          <label>To<input id="reportsCustomTo" type="date" onchange="updateReportsCustomDates()"></label>
+        </div>
+      </div>
       <div id="reportPanel"><div class="loading-card">Loading report...</div></div>`;
   }
 
   let currentReportTab='sales';
+  let reportsRawData={};
+  let reportsDateFilter={range:'all', from:'', to:''};
+  let currentReportExport={title:'', headers:[], rows:[]};
 
   function setReportTab(tab){
     currentReportTab=tab;
@@ -4349,9 +4373,71 @@
     loadReports(tab);
   }
 
+  function reportsDateFilterAppliesTo(tab){
+    return tab==='sales' || tab==='bookings' || tab==='payments' || tab==='expenses';
+  }
+
+  function updateReportsDateFilterVisibility(tab){
+    const panel=document.getElementById('reportsDateFilterPanel');
+    if(panel) panel.style.display=reportsDateFilterAppliesTo(tab)?'':'none';
+  }
+
+  function setReportsDateFilter(range){
+    reportsDateFilter.range=range;
+    ['all','today','week','month','year','custom'].forEach(function(r){
+      const el=document.getElementById('reportsDate_'+r);
+      if(el) el.classList.toggle('active', r===range);
+    });
+    const customRow=document.getElementById('reportsCustomDateRow');
+    if(customRow) customRow.style.display=range==='custom'?'grid':'none';
+    renderCurrentReportTab();
+  }
+
+  function updateReportsCustomDates(){
+    const fromEl=document.getElementById('reportsCustomFrom');
+    const toEl=document.getElementById('reportsCustomTo');
+    reportsDateFilter.from=fromEl?fromEl.value:'';
+    reportsDateFilter.to=toEl?toEl.value:'';
+    renderCurrentReportTab();
+  }
+
+  function reportsMatchesDateRange(dateValue){
+    const range=reportsDateFilter.range;
+    if(range==='all') return true;
+    const d=new Date(dateValue);
+    if(isNaN(d.getTime())) return false;
+    const now=new Date();
+    if(range==='today'){
+      return d.toDateString()===now.toDateString();
+    }
+    if(range==='week'){
+      const start=new Date(now);
+      start.setDate(now.getDate()-now.getDay());
+      start.setHours(0,0,0,0);
+      const end=new Date(start);
+      end.setDate(start.getDate()+7);
+      return d>=start && d<end;
+    }
+    if(range==='month'){
+      return d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth();
+    }
+    if(range==='year'){
+      return d.getFullYear()===now.getFullYear();
+    }
+    if(range==='custom'){
+      const from=reportsDateFilter.from?new Date(reportsDateFilter.from+'T00:00:00'):null;
+      const to=reportsDateFilter.to?new Date(reportsDateFilter.to+'T23:59:59'):null;
+      if(from && d<from) return false;
+      if(to && d>to) return false;
+      return true;
+    }
+    return true;
+  }
+
   function loadReports(tab){
     tab=tab||'sales';
     currentReportTab=tab;
+    updateReportsDateFilterVisibility(tab);
     const panel=document.getElementById('reportPanel');
     if(!panel)return;
     panel.innerHTML='<div class="loading-card">Loading report...</div>';
@@ -4359,14 +4445,8 @@
     if(tab==='sales' || tab==='bookings'){
       google.script.run.withSuccessHandler(function(r){
         if(!r||!r.ok){panel.innerHTML='<div class="error-card">'+esc(r&&r.message||'Unable to load report.')+'</div>';return;}
-        const rows=(r.bookings||[]).filter(function(b){ return String(b['Booking Status']||'').toLowerCase()!=='cancelled'; })
-          .sort(function(a,b){ return (new Date(b['Event Date']||0)) - (new Date(a['Event Date']||0)); });
-        const totalSales=rows.reduce((s,b)=>s+Number(b['Final Amount']||b['Total Amount Due']||0),0);
-        panel.innerHTML=`
-          <div class="stat-strip">${uiStat('Total Sales',money(totalSales))}${uiStat('Active Bookings',rows.length)}</div>
-          <div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Client</th><th>Event</th><th>Date</th><th>Amount</th><th>Payment Status</th><th>Booking Status</th></tr></thead><tbody>
-          ${rows.length?rows.map(b=>`<tr><td><strong>${esc(b['Client Name']||'')}</strong></td><td>${esc(b['Event Name']||b['Event Type']||'')}</td><td>${esc(formatDate(b['Event Date']))}</td><td>${money(b['Final Amount']||b['Total Amount Due']||0)}</td><td><span class="badge">${esc(b['Payment Status']||'Unpaid')}</span></td><td>${esc(b['Booking Status']||'Pending')}</td></tr>`).join(''):'<tr><td colspan="6"><div class="empty-state">No bookings recorded.</div></td></tr>'}
-          </tbody></table></div></div>`;
+        reportsRawData.bookings=(r.bookings||[]).filter(function(b){ return String(b['Booking Status']||'').toLowerCase()!=='cancelled'; });
+        renderCurrentReportTab();
       }).withFailureHandler(function(e){panel.innerHTML='<div class="error-card">'+esc(e&&e.message||'Unable to load report.')+'</div>';}).getBookings(state.token);
       return;
     }
@@ -4374,13 +4454,8 @@
     if(tab==='payments'){
       google.script.run.withSuccessHandler(function(r){
         if(!r||!r.ok){panel.innerHTML='<div class="error-card">'+esc(r&&r.message||'Unable to load report.')+'</div>';return;}
-        const rows=(r.payments||[]).slice().sort(function(a,b){ return (new Date(b['Payment Date']||0)) - (new Date(a['Payment Date']||0)); });
-        const total=rows.reduce((s,p)=>s+Number(p.Amount||0),0);
-        panel.innerHTML=`
-          <div class="stat-strip">${uiStat('Total Collected',money(total))}${uiStat('Transactions',rows.length)}</div>
-          <div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Booking</th><th>Milestone</th><th>Amount</th><th>Method</th></tr></thead><tbody>
-          ${rows.length?rows.map(p=>`<tr><td>${esc(formatDate(p['Payment Date']))}</td><td>${esc(p.BookingID||'—')}</td><td>${esc(p.Milestone||'Payment')}</td><td>${money(p.Amount||0)}</td><td>${esc(p.Method||'')}</td></tr>`).join(''):'<tr><td colspan="5"><div class="empty-state">No payments recorded.</div></td></tr>'}
-          </tbody></table></div></div>`;
+        reportsRawData.payments=r.payments||[];
+        renderCurrentReportTab();
       }).withFailureHandler(function(e){panel.innerHTML='<div class="error-card">'+esc(e&&e.message||'Unable to load report.')+'</div>';}).getAllPayments(state.token);
       return;
     }
@@ -4388,13 +4463,8 @@
     if(tab==='inventory'){
       google.script.run.withSuccessHandler(function(r){
         if(!r||!r.ok){panel.innerHTML='<div class="error-card">'+esc(r&&r.message||'Unable to load report.')+'</div>';return;}
-        const rows=r.inventory||[];
-        const totalValue=rows.reduce((s,i)=>s+Number(i['Inventory Value']||0),0);
-        panel.innerHTML=`
-          <div class="stat-strip">${uiStat('Inventory Value',money(totalValue))}${uiStat('Products',rows.length)}</div>
-          <div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Product</th><th>Current</th><th>Available</th><th>Value</th></tr></thead><tbody>
-          ${rows.length?rows.map(i=>`<tr><td><strong>${esc(i['Product Name']||'')}</strong></td><td>${esc(i['Current Stock']||0)}</td><td>${esc(i['Available Stock']||0)}</td><td>${money(i['Inventory Value']||0)}</td></tr>`).join(''):'<tr><td colspan="4"><div class="empty-state">No inventory records.</div></td></tr>'}
-          </tbody></table></div></div>`;
+        reportsRawData.inventory=r.inventory||[];
+        renderCurrentReportTab();
       }).withFailureHandler(function(e){panel.innerHTML='<div class="error-card">'+esc(e&&e.message||'Unable to load report.')+'</div>';}).getInventory(state.token);
       return;
     }
@@ -4402,13 +4472,8 @@
     if(tab==='expenses'){
       google.script.run.withSuccessHandler(function(r){
         if(!r||!r.ok){panel.innerHTML='<div class="error-card">'+esc(r&&r.message||'Unable to load report.')+'</div>';return;}
-        const rows=(r.expenses||[]).slice().sort(function(a,b){ return (new Date(b.Date||0)) - (new Date(a.Date||0)); });
-        const total=rows.reduce((s,e)=>s+Number(e.Amount||0),0);
-        panel.innerHTML=`
-          <div class="stat-strip">${uiStat('Total Expenses',money(total))}${uiStat('Transactions',rows.length)}</div>
-          <div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Booking</th><th>Category</th><th>Amount</th></tr></thead><tbody>
-          ${rows.length?rows.map(e=>`<tr><td>${esc(formatDate(e.Date))}</td><td>${esc(e.BookingID||'—')}</td><td>${esc(e.Category||'Other')}</td><td>${money(e.Amount||0)}</td></tr>`).join(''):'<tr><td colspan="4"><div class="empty-state">No expenses recorded.</div></td></tr>'}
-          </tbody></table></div></div>`;
+        reportsRawData.expenses=r.expenses||[];
+        renderCurrentReportTab();
       }).withFailureHandler(function(e){panel.innerHTML='<div class="error-card">'+esc(e&&e.message||'Unable to load report.')+'</div>';}).getAllExpenses(state.token);
       return;
     }
@@ -4417,12 +4482,8 @@
       const period=new Date().toISOString().slice(0,7);
       google.script.run.withSuccessHandler(function(r){
         if(!r||!r.ok){panel.innerHTML='<div class="error-card">'+esc(r&&r.message||'Unable to load report.')+'</div>';return;}
-        const rows=r.rows||[];
-        panel.innerHTML=`
-          <div class="stat-strip">${uiStat('Gross Pay',money(r.totals.gross))}${uiStat('Net Pay',money(r.totals.net))}${uiStat('Employees',r.totals.employees)}${uiStat('Period',period)}</div>
-          <div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Employee</th><th>Shows</th><th>Gross Pay</th><th>Net Pay</th><th>Status</th></tr></thead><tbody>
-          ${rows.length?rows.map(x=>`<tr><td><strong>${esc(x['Employee Name'])}</strong></td><td>${esc(x.Shows)}</td><td>${money(x['Gross Pay'])}</td><td>${money(x['Net Pay'])}</td><td>${esc(x.Status)}</td></tr>`).join(''):'<tr><td colspan="5"><div class="empty-state">No payroll activity this month.</div></td></tr>'}
-          </tbody></table></div></div>`;
+        reportsRawData.payroll={rows:r.rows||[], totals:r.totals||{}, period:period};
+        renderCurrentReportTab();
       }).withFailureHandler(function(e){panel.innerHTML='<div class="error-card">'+esc(e&&e.message||'Unable to load report.')+'</div>';}).getPayrollSummary(state.token,period);
       return;
     }
@@ -4430,26 +4491,195 @@
     if(tab==='profit'){
       google.script.run.withSuccessHandler(function(r){
         if(!r||!r.ok){panel.innerHTML='<div class="error-card">'+esc(r&&r.message||'Unable to load report.')+'</div>';return;}
-        const m=r.metrics||{};
-        panel.innerHTML=`
-          <div class="stat-strip">
-            ${uiStat('Monthly Sales',money(m.monthlySalesTotal||0))}
-            ${uiStat('Monthly Expenses',money(m.monthlyExpenses||0))}
-            ${uiStat('Monthly Payroll',money(m.monthlyPayroll||0))}
-            ${uiStat('Net Profit',money(m.netProfit||0))}
-          </div>
-          <div class="panel">
-            <div class="panel-head"><div><div class="panel-title">Profit Summary</div><div class="panel-subtitle">Total sales minus monthly expenses and payroll.</div></div></div>
-            <div class="profit-breakdown">
-              ${profitLineUI('Monthly Sales',m.monthlySalesTotal||0)}
-              ${profitLineUI('Monthly Expenses',-(m.monthlyExpenses||0))}
-              ${profitLineUI('Monthly Payroll',-(m.monthlyPayroll||0))}
-              <div class="profit-total"><span>Net Profit</span><strong>${money(m.netProfit||0)}</strong></div>
-            </div>
-          </div>`;
+        reportsRawData.profit=r.metrics||{};
+        renderCurrentReportTab();
       }).withFailureHandler(function(e){panel.innerHTML='<div class="error-card">'+esc(e&&e.message||'Unable to load report.')+'</div>';}).getDashboard(state.token);
       return;
     }
+  }
+
+  function renderCurrentReportTab(){
+    const panel=document.getElementById('reportPanel');
+    if(!panel) return;
+    const tab=currentReportTab;
+    if(tab==='sales' || tab==='bookings') return renderSalesReport(panel);
+    if(tab==='payments') return renderPaymentsReport(panel);
+    if(tab==='inventory') return renderInventoryReport(panel);
+    if(tab==='expenses') return renderExpensesReport(panel);
+    if(tab==='payroll') return renderPayrollReport(panel);
+    if(tab==='profit') return renderProfitReport(panel);
+  }
+
+  function renderSalesReport(panel){
+    const rows=(reportsRawData.bookings||[]).filter(function(b){ return reportsMatchesDateRange(b['Event Date']); })
+      .sort(function(a,b){ return (new Date(b['Event Date']||0)) - (new Date(a['Event Date']||0)); });
+    const totalSales=rows.reduce((s,b)=>s+Number(b['Final Amount']||b['Total Amount Due']||0),0);
+
+    currentReportExport={
+      title:'Sales Report',
+      headers:['Client','Event','Date','Amount','Payment Status','Booking Status'],
+      rows:rows.map(function(b){ return [b['Client Name']||'', b['Event Name']||b['Event Type']||'', formatDate(b['Event Date']), Number(b['Final Amount']||b['Total Amount Due']||0).toFixed(2), b['Payment Status']||'Unpaid', b['Booking Status']||'Pending']; })
+    };
+
+    panel.innerHTML=`
+      <div class="stat-strip">${uiStat('Total Sales',money(totalSales))}${uiStat('Active Bookings',rows.length)}</div>
+      <div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Client</th><th>Event</th><th>Date</th><th>Amount</th><th>Payment Status</th><th>Booking Status</th></tr></thead><tbody>
+      ${rows.length?rows.map(b=>`<tr><td><strong>${esc(b['Client Name']||'')}</strong></td><td>${esc(b['Event Name']||b['Event Type']||'')}</td><td>${esc(formatDate(b['Event Date']))}</td><td>${money(b['Final Amount']||b['Total Amount Due']||0)}</td><td><span class="badge">${esc(b['Payment Status']||'Unpaid')}</span></td><td>${esc(b['Booking Status']||'Pending')}</td></tr>`).join(''):'<tr><td colspan="6"><div class="empty-state">No bookings found for the selected period.</div></td></tr>'}
+      </tbody></table></div></div>`;
+  }
+
+  function renderPaymentsReport(panel){
+    const rows=(reportsRawData.payments||[]).filter(function(p){ return reportsMatchesDateRange(p['Payment Date']); })
+      .sort(function(a,b){ return (new Date(b['Payment Date']||0)) - (new Date(a['Payment Date']||0)); });
+    const total=rows.reduce((s,p)=>s+Number(p.Amount||0),0);
+
+    currentReportExport={
+      title:'Payments Report',
+      headers:['Date','Booking','Milestone','Amount','Method'],
+      rows:rows.map(function(p){ return [formatDate(p['Payment Date']), p.BookingID||'', p.Milestone||'Payment', Number(p.Amount||0).toFixed(2), p.Method||'']; })
+    };
+
+    panel.innerHTML=`
+      <div class="stat-strip">${uiStat('Total Collected',money(total))}${uiStat('Transactions',rows.length)}</div>
+      <div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Booking</th><th>Milestone</th><th>Amount</th><th>Method</th></tr></thead><tbody>
+      ${rows.length?rows.map(p=>`<tr><td>${esc(formatDate(p['Payment Date']))}</td><td>${esc(p.BookingID||'—')}</td><td>${esc(p.Milestone||'Payment')}</td><td>${money(p.Amount||0)}</td><td>${esc(p.Method||'')}</td></tr>`).join(''):'<tr><td colspan="5"><div class="empty-state">No payments found for the selected period.</div></td></tr>'}
+      </tbody></table></div></div>`;
+  }
+
+  function renderInventoryReport(panel){
+    const rows=reportsRawData.inventory||[];
+    const totalValue=rows.reduce((s,i)=>s+Number(i['Inventory Value']||0),0);
+
+    currentReportExport={
+      title:'Inventory Report',
+      headers:['Product','Current','Available','Value'],
+      rows:rows.map(function(i){ return [i['Product Name']||'', i['Current Stock']||0, i['Available Stock']||0, Number(i['Inventory Value']||0).toFixed(2)]; })
+    };
+
+    panel.innerHTML=`
+      <div class="stat-strip">${uiStat('Inventory Value',money(totalValue))}${uiStat('Products',rows.length)}</div>
+      <div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Product</th><th>Current</th><th>Available</th><th>Value</th></tr></thead><tbody>
+      ${rows.length?rows.map(i=>`<tr><td><strong>${esc(i['Product Name']||'')}</strong></td><td>${esc(i['Current Stock']||0)}</td><td>${esc(i['Available Stock']||0)}</td><td>${money(i['Inventory Value']||0)}</td></tr>`).join(''):'<tr><td colspan="4"><div class="empty-state">No inventory records.</div></td></tr>'}
+      </tbody></table></div></div>`;
+  }
+
+  function renderExpensesReport(panel){
+    const rows=(reportsRawData.expenses||[]).filter(function(e){ return reportsMatchesDateRange(e.Date); })
+      .sort(function(a,b){ return (new Date(b.Date||0)) - (new Date(a.Date||0)); });
+    const total=rows.reduce((s,e)=>s+Number(e.Amount||0),0);
+
+    currentReportExport={
+      title:'Expenses Report',
+      headers:['Date','Booking','Category','Amount'],
+      rows:rows.map(function(e){ return [formatDate(e.Date), e.BookingID||'', e.Category||'Other', Number(e.Amount||0).toFixed(2)]; })
+    };
+
+    panel.innerHTML=`
+      <div class="stat-strip">${uiStat('Total Expenses',money(total))}${uiStat('Transactions',rows.length)}</div>
+      <div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Booking</th><th>Category</th><th>Amount</th></tr></thead><tbody>
+      ${rows.length?rows.map(e=>`<tr><td>${esc(formatDate(e.Date))}</td><td>${esc(e.BookingID||'—')}</td><td>${esc(e.Category||'Other')}</td><td>${money(e.Amount||0)}</td></tr>`).join(''):'<tr><td colspan="4"><div class="empty-state">No expenses found for the selected period.</div></td></tr>'}
+      </tbody></table></div></div>`;
+  }
+
+  function renderPayrollReport(panel){
+    const data=reportsRawData.payroll||{rows:[], totals:{}, period:''};
+    const rows=data.rows||[];
+    const totals=data.totals||{};
+
+    currentReportExport={
+      title:'Payroll Report',
+      headers:['Employee','Shows','Gross Pay','Net Pay','Status'],
+      rows:rows.map(function(x){ return [x['Employee Name']||'', x.Shows||0, Number(x['Gross Pay']||0).toFixed(2), Number(x['Net Pay']||0).toFixed(2), x.Status||'']; })
+    };
+
+    panel.innerHTML=`
+      <div class="stat-strip">${uiStat('Gross Pay',money(totals.gross||0))}${uiStat('Net Pay',money(totals.net||0))}${uiStat('Employees',totals.employees||0)}${uiStat('Period',data.period||'')}</div>
+      <div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Employee</th><th>Shows</th><th>Gross Pay</th><th>Net Pay</th><th>Status</th></tr></thead><tbody>
+      ${rows.length?rows.map(x=>`<tr><td><strong>${esc(x['Employee Name'])}</strong></td><td>${esc(x.Shows)}</td><td>${money(x['Gross Pay'])}</td><td>${money(x['Net Pay'])}</td><td>${esc(x.Status)}</td></tr>`).join(''):'<tr><td colspan="5"><div class="empty-state">No payroll activity this month.</div></td></tr>'}
+      </tbody></table></div></div>`;
+  }
+
+  function renderProfitReport(panel){
+    const m=reportsRawData.profit||{};
+
+    currentReportExport={
+      title:'Profit Report',
+      headers:['Metric','Amount'],
+      rows:[
+        ['Monthly Sales', Number(m.monthlySalesTotal||0).toFixed(2)],
+        ['Monthly Expenses', Number(m.monthlyExpenses||0).toFixed(2)],
+        ['Monthly Payroll', Number(m.monthlyPayroll||0).toFixed(2)],
+        ['Net Profit', Number(m.netProfit||0).toFixed(2)]
+      ]
+    };
+
+    panel.innerHTML=`
+      <div class="stat-strip">
+        ${uiStat('Monthly Sales',money(m.monthlySalesTotal||0))}
+        ${uiStat('Monthly Expenses',money(m.monthlyExpenses||0))}
+        ${uiStat('Monthly Payroll',money(m.monthlyPayroll||0))}
+        ${uiStat('Net Profit',money(m.netProfit||0))}
+      </div>
+      <div class="panel">
+        <div class="panel-head"><div><div class="panel-title">Profit Summary</div><div class="panel-subtitle">Total sales minus monthly expenses and payroll.</div></div></div>
+        <div class="profit-breakdown">
+          ${profitLineUI('Monthly Sales',m.monthlySalesTotal||0)}
+          ${profitLineUI('Monthly Expenses',-(m.monthlyExpenses||0))}
+          ${profitLineUI('Monthly Payroll',-(m.monthlyPayroll||0))}
+          <div class="profit-total"><span>Net Profit</span><strong>${money(m.netProfit||0)}</strong></div>
+        </div>
+      </div>`;
+  }
+
+  function exportCurrentReportCSV(){
+    const {title, headers, rows}=currentReportExport;
+    if(!rows||!rows.length){toast('No data to export for this report.');return;}
+    const lines=[headers.join(',')];
+    rows.forEach(function(row){
+      const cells=row.map(function(v){
+        const s=String(v==null?'':v).replace(/"/g,'""');
+        return /[",\n]/.test(s) ? '"'+s+'"' : s;
+      });
+      lines.push(cells.join(','));
+    });
+    const csv=lines.join('\n');
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download=(title||'report').toLowerCase().replace(/\s+/g,'-')+'-'+new Date().toISOString().slice(0,10)+'.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); },1000);
+    toast('Report exported to CSV.');
+  }
+
+  function printCurrentReport(){
+    const {title, headers, rows}=currentReportExport;
+    if(!rows||!rows.length){toast('No data to print for this report.');return;}
+    const win=window.open('','_blank');
+    if(!win){toast('Please allow pop-ups to print this report.');return;}
+    const html=`<!DOCTYPE html><html><head><title>${esc(title||'Report')}</title><style>
+      body{font-family:Arial,Helvetica,sans-serif;color:#111;padding:24px;}
+      h1{font-size:20px;margin-bottom:4px;}
+      p.sub{color:#555;margin-top:0;font-size:12px;}
+      table{width:100%;border-collapse:collapse;margin-top:16px;}
+      th,td{border:1px solid #ccc;padding:6px 8px;font-size:11px;text-align:left;}
+      th{background:#f2f2f2;}
+      @media print{body{padding:0;}}
+    </style></head><body>
+      <h1>CUSTODIO SUPLICO FIREWORKS — ${esc(title||'Report')}</h1>
+      <p class="sub">Generated ${esc(new Date().toLocaleString('en-PH'))}</p>
+      <table><thead><tr>${headers.map(function(h){ return `<th>${esc(h)}</th>`; }).join('')}</tr></thead><tbody>
+      ${rows.map(function(row){ return `<tr>${row.map(function(c){ return `<td>${esc(c)}</td>`; }).join('')}</tr>`; }).join('')}
+      </tbody></table>
+    </body></html>`;
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(function(){ win.print(); },300);
   }
 
   function uiNotifications(){
