@@ -3770,7 +3770,7 @@
                 <tbody>
                   ${r.rows.map(x=>{
                     const detail = (x['Show Breakdown']||[]).map(b=>
-                      `<div class="detail-row"><span>${esc(formatDate(b.eventDate))} · ${esc(b.eventName)}</span><strong>${money(b.pay)}</strong></div>`
+                      `<div class="detail-row"><span>${esc(formatDate(b.eventDate))} · ${esc(b.eventName)}</span></div>`
                     ).join('');
                     return `
                       <tr>
