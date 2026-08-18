@@ -4477,8 +4477,12 @@ function safeUser_(user) {
 
 function audit_(user, action, module, recordId, details) {
   // Ensure the audit sheet exists even when setupSystem() was not re-run.
+  // audit_() runs on every single save/update/delete across the whole app,
+  // so use the cheap "only touch the sheet if it's actually missing" check
+  // (a single getSheetByName lookup) instead of unconditionally re-reading
+  // the header row and rewriting setFrozenRows on every single call.
   const ss = getSpreadsheet_();
-  ensureSheet_(ss, 'AuditLog', [
+  ensureSheetIfMissing_(ss, 'AuditLog', [
     'ID','User','Action','Module','Record ID','Timestamp','Details'
   ]);
 
