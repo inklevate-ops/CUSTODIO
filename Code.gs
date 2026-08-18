@@ -2086,6 +2086,34 @@ function savePayroll(token, payload) {
   }
 }
 
+/**
+ * Deletes a processed Payroll record so it can be reprocessed if it was
+ * created by mistake. This does NOT reverse any Employee Advance/Loan
+ * deductions that were applied when the payroll was originally processed -
+ * those need to be adjusted manually if the deduction should be undone too.
+ */
+function deletePayrollRecord(token, payrollId) {
+  const auth = requireAuth_(token);
+  if (!auth.ok) return auth;
+
+  const id = String(payrollId || '').trim();
+  if (!id) return {ok:false, message:'Payroll record ID is required.'};
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const record = findRowById_('Payroll', id);
+    if (!record) return {ok:false, message:'Payroll record not found.'};
+
+    deleteRowById_('Payroll', id);
+    audit_(auth.user, 'DELETE', 'Payroll', id, record);
+
+    return {ok:true, message:'Payroll record deleted successfully.'};
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 
 function getMaterials(token) {
   const auth = requireAuth_(token);

@@ -3779,7 +3779,7 @@
                         <td><span class="badge">${esc(x.Status)}</span></td>
                         <td>
                           ${x.Processed
-                            ? `<span class="muted">Processed</span>`
+                            ? `<div class="table-actions"><span class="muted">Processed</span><button class="table-action danger-text" onclick="deletePayrollUI('${esc(x.PayrollID)}')">Delete</button></div>`
                             : x.Shows
                               ? `<button class="btn gold small" onclick="processPayrollUI('${esc(x.EmployeeID)}','${esc(period)}')">Process</button>`
                               : '—'}
@@ -3820,6 +3820,30 @@
         payrollPeriod:period,
         paymentDate:new Date().toISOString().slice(0,10)
       });
+  }
+
+  function deletePayrollUI(payrollId){
+    const id=String(payrollId||'').trim();
+    if(!id){
+      toast('Payroll record ID is missing.');
+      return;
+    }
+    if(!confirm('Delete this processed payroll record? Note: this does not automatically reverse any employee advance/loan deductions that were applied when it was processed - adjust those manually if needed.')) return;
+
+    google.script.run
+      .withSuccessHandler(function(r){
+        if(!r||!r.ok){
+          toast(r&&r.message||'Unable to delete payroll record.');
+          return;
+        }
+        toast(r.message||'Payroll record deleted successfully.');
+        loadPayroll();
+        loadEmployees();
+      })
+      .withFailureHandler(function(e){
+        toast(e&&e.message||'Unable to delete payroll record.');
+      })
+      .deletePayrollRecord(state.token,id);
   }
 
   function openEmployeeAdvanceDialog(employeeId){
