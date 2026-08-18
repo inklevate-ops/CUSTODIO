@@ -3798,6 +3798,24 @@
               </table>
             </div>
           </div>`;
+
+        // TEMPORARY diagnostic block - remove once the Processed-status
+        // matching issue is confirmed fixed. Shows exactly what the server
+        // returned for each row so we can see raw EmployeeID/PayrollID/
+        // Processed/Status values without needing to inspect the Sheet.
+        panel.insertAdjacentHTML('beforeend', '<div class="panel"><div class="panel-title">Debug info (temporary)</div><pre style="white-space:pre-wrap;font-size:11px;color:#9fd6a0;overflow:auto;max-height:320px;">'+esc(JSON.stringify({
+          requestedPeriod:period,
+          rows:r.rows.map(function(x){
+            return {
+              EmployeeName:x['Employee Name'],
+              EmployeeID:x.EmployeeID,
+              PayrollID:x.PayrollID,
+              Processed:x.Processed,
+              Status:x.Status,
+              Shows:x.Shows
+            };
+          })
+        }, null, 2))+'</pre></div>');
       })
       .withFailureHandler(function(e){
         finished=true; clearTimeout(timeoutId);
