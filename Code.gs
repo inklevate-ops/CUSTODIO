@@ -4035,8 +4035,20 @@ function deleteBookingPayment(token, paymentId) {
     if (!payment) return {ok:false, message:'Payment not found.'};
 
     const bookingId = String(payment.BookingID || '').trim();
+    // Fetch the booking and compute the post-delete payment total before
+    // deleting, so recalculateBookingPaymentTotals_ doesn't need to
+    // separately re-read the Bookings sheet afterward.
+    const booking = bookingId ? findRowById_('Bookings', bookingId) : null;
+    const remainingPaidTotal = bookingId
+      ? getOrEmpty_('Payments')
+          .filter(function(p){ return String(p.BookingID || '').trim() === bookingId && String(p.ID || '') !== id; })
+          .reduce(function(sum, p){ return sum + number_(p.Amount); }, 0)
+      : 0;
+
     deleteRowById_('Payments', id);
-    const totals = bookingId ? recalculateBookingPaymentTotals_(bookingId) : null;
+    const totals = bookingId
+      ? recalculateBookingPaymentTotals_(bookingId, booking, remainingPaidTotal)
+      : null;
 
     audit_(auth.user, 'DELETE', 'Payments', id, payment);
     return {ok:true, message:'Payment deleted successfully.', totals:totals};
