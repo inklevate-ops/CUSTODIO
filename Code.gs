@@ -758,7 +758,7 @@ function saveLoan(token, payload) {
     }
     upsertRow_('Loans', record);
     audit_(auth.user, existing ? 'UPDATE' : 'CREATE', 'Loans', id, record);
-    return {ok:true, message:existing ? 'Loan updated successfully.' : 'Loan recorded successfully.', loan:record};
+    return sanitizeForClient_({ok:true, message:existing ? 'Loan updated successfully.' : 'Loan recorded successfully.', loan:record});
   } finally {
     lock.releaseLock();
   }
@@ -814,7 +814,7 @@ function recordLoanPayment(token, payload) {
     }
 
     audit_(auth.user, 'LOAN_PAYMENT', 'Loans', loanId, {amount:payment, remaining:loan['Outstanding Balance']});
-    return {ok:true, message:'Loan payment recorded successfully.', loan:loan};
+    return sanitizeForClient_({ok:true, message:'Loan payment recorded successfully.', loan:loan});
   } finally {
     lock.releaseLock();
   }
@@ -1447,7 +1447,7 @@ function saveEmployee(token, payload) {
   try {
     upsertRow_('Employees', record);
     audit_(auth.user, existing ? 'UPDATE' : 'CREATE', 'Employees', id, record);
-    return {ok:true, message:existing ? 'Employee updated successfully.' : 'Employee added successfully.', employee:record};
+    return sanitizeForClient_({ok:true, message:existing ? 'Employee updated successfully.' : 'Employee added successfully.', employee:record});
   } finally {
     lock.releaseLock();
   }
@@ -1743,7 +1743,7 @@ function saveEmployeeAdvance(token, payload) {
   try {
     upsertRow_('EmployeeAdvances', record);
     audit_(auth.user, existing ? 'UPDATE' : 'CREATE', 'Employee Advances', id, record);
-    return {ok:true, message:existing ? 'Employee advance/loan updated.' : 'Employee advance/loan recorded.', advance:record};
+    return sanitizeForClient_({ok:true, message:existing ? 'Employee advance/loan updated.' : 'Employee advance/loan recorded.', advance:record});
   } finally {
     lock.releaseLock();
   }
@@ -1773,7 +1773,7 @@ function recordEmployeeAdvancePayment(token, payload) {
     row['Updated Date'] = new Date();
     upsertRow_('EmployeeAdvances', row);
     audit_(auth.user, 'EMPLOYEE_ADVANCE_PAYMENT', 'Employee Advances', id, {amount:payment, remaining:row['Outstanding Balance']});
-    return {ok:true, message:'Employee advance/loan payment recorded.', advance:row};
+    return sanitizeForClient_({ok:true, message:'Employee advance/loan payment recorded.', advance:row});
   } finally {
     lock.releaseLock();
   }
@@ -1921,7 +1921,7 @@ function getPayrollSummary(token, payrollPeriod) {
     }
   });
 
-  return {
+  return sanitizeForClient_({
     ok:true,
     period:period,
     rows:rows,
@@ -1933,7 +1933,7 @@ function getPayrollSummary(token, payrollPeriod) {
       employees:rows.length,
       processed:rows.filter(r => r.Processed).length
     }
-  };
+  });
 }
 
 function savePayroll(token, payload) {
@@ -2060,11 +2060,11 @@ function savePayroll(token, payload) {
       netPay:payroll['Net Salary']
     });
 
-    return {
+    return sanitizeForClient_({
       ok:true,
       message:'Payroll processed successfully.',
       payroll:payroll
-    };
+    });
   } finally {
     lock.releaseLock();
   }
@@ -2164,7 +2164,7 @@ function saveMaterialAndSeedStock(token, payload) {
     });
 
     audit_(auth.user, 'CREATE', 'Materials', materialId, {quantity, purchaseCost});
-    return {ok:true, message:'Material created with initial stock.', material};
+    return sanitizeForClient_({ok:true, message:'Material created with initial stock.', material:material});
   } finally {
     lock.releaseLock();
   }
@@ -2749,14 +2749,14 @@ function updateClientShowStatus(token, bookingId, status) {
       to: nextStatus
     });
 
-    return {
+    return sanitizeForClient_({
       ok:true,
       booking:booking,
       message:
         nextStatus === 'Booked' ? 'Client is now booked.' :
         nextStatus === 'Cancelled' ? 'Client/show cancelled.' :
         'Client/show moved to pending.'
-    };
+    });
   } finally {
     lock.releaseLock();
   }
@@ -2918,11 +2918,11 @@ function cancelClientShow(token, bookingId) {
       to: 'Cancelled'
     });
 
-    return {
+    return sanitizeForClient_({
       ok:true,
       message:'Client/show cancelled successfully.',
       booking:booking
-    };
+    });
   } finally {
     lock.releaseLock();
   }
@@ -3631,6 +3631,30 @@ function getBookingEventTimeDiagnostics(token, bookingId) {
   };
 }
 
+/**
+ * google.script.run cannot transport raw Date objects (or objects containing
+ * them) back to the browser - the request silently fails and the client's
+ * failure handler runs instead of the success handler, even though the
+ * underlying Sheet write already succeeded. This walks a response payload
+ * and converts every Date into an ISO string so it is always safe to return.
+ */
+function sanitizeForClient_(value) {
+  if (value instanceof Date) {
+    return isNaN(value.getTime()) ? '' : value.toISOString();
+  }
+  if (Array.isArray(value)) {
+    return value.map(sanitizeForClient_);
+  }
+  if (value && typeof value === 'object') {
+    const out = {};
+    Object.keys(value).forEach(function(key){
+      out[key] = sanitizeForClient_(value[key]);
+    });
+    return out;
+  }
+  return value;
+}
+
 function findRowById_(sheetName, id) {
   return getOrEmpty_(sheetName).find(r => String(r.ID) === String(id)) || null;
 }
@@ -3758,12 +3782,12 @@ function saveBookingPayment(token, payload) {
     const totals = recalculateBookingPaymentTotals_(bookingId);
     audit_(auth.user, existing ? 'UPDATE' : 'CREATE', 'Payments', id, record);
 
-    return {
+    return sanitizeForClient_({
       ok:true,
       message:existing ? 'Payment updated successfully.' : 'Payment recorded successfully.',
       payment:record,
       totals:totals
-    };
+    });
   } finally {
     lock.releaseLock();
   }
@@ -3841,11 +3865,11 @@ function saveShowExpense(token, payload) {
     upsertRow_('Expenses', record);
     audit_(auth.user, existing ? 'UPDATE' : 'CREATE', 'Expenses', id, record);
 
-    return {
+    return sanitizeForClient_({
       ok:true,
       message:existing ? 'Expense updated successfully.' : 'Expense recorded successfully.',
       expense:record
-    };
+    });
   } finally {
     lock.releaseLock();
   }
@@ -3975,7 +3999,7 @@ function getNotifications(token) {
 
   notifications.sort(function(a,b){ return (toDate_(b.time) || 0) - (toDate_(a.time) || 0); });
 
-  return {ok:true, notifications:notifications.slice(0, 30)};
+  return sanitizeForClient_({ok:true, notifications:notifications.slice(0, 30)});
 }
 
 
