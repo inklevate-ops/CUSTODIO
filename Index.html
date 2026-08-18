@@ -3787,7 +3787,7 @@
                         <td><span class="badge">${esc(x.Status)}</span></td>
                         <td>
                           ${x.Processed
-                            ? `<div class="table-actions"><span class="muted">Processed</span><button class="table-action danger-text" onclick="deletePayrollUI('${esc(x.PayrollID)}')">Delete</button></div>`
+                            ? `<button class="table-action danger-text" onclick="deletePayrollUI('${esc(x.PayrollID)}')">Delete</button>`
                             : x.Shows
                               ? `<button class="btn gold small" onclick="processPayrollUI('${esc(x.EmployeeID)}','${esc(period)}')">Process</button>`
                               : '—'}
