@@ -481,6 +481,11 @@
 
     .pending-client-panel{padding:16px}.pending-toolbar{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px}.pending-badge{color:#e9b95e;background:rgba(215,173,85,.12)}
     .void-warning{padding:12px 14px;border:1px solid #6d3838;background:rgba(180,60,60,.1);color:#ff9e9e;border-radius:12px;font-size:12px;margin-bottom:14px}
+    .mini-bar-list{display:grid;gap:10px;margin-top:12px}.mini-bar-item{display:grid;grid-template-columns:70px 1fr auto;align-items:center;gap:12px}.mini-bar-item span{font-size:11px;color:#aaa}.mini-bar-item strong{font-size:12px;color:#eee;text-align:right}
+    .mini-bar-track{height:8px;border-radius:999px;background:#1c1c1c;overflow:hidden}.mini-bar-track>i{display:block;height:100%;background:linear-gradient(90deg,var(--gold2),var(--gold));border-radius:999px}
+    .mini-bar-item.current .mini-bar-track>i{background:linear-gradient(90deg,#5fd68a,#78d499)}.mini-bar-item.current span{color:var(--gold2);font-weight:700}
+    .trend-up{color:#78d499}.trend-down{color:#e8a0a0}
+    @media(max-width:520px){.mini-bar-item{grid-template-columns:56px 1fr auto}}
     .input-suffix{display:flex;align-items:center;background:#0c0c0c;border:1px solid #2a2a2a;border-radius:10px;padding:0 11px}
     .input-suffix input{border:0!important;background:transparent!important;padding:10px 0!important;flex:1 1 auto;min-width:0;color:#eee!important;outline:none!important;box-shadow:none!important}
     .input-suffix span{color:#888;font-size:12px;font-weight:700;flex:0 0 auto;padding-left:6px}
@@ -4349,6 +4354,7 @@
             <button class="filter-btn" id="reportsDate_month" onclick="setReportsDateFilter('month')">This Month</button>
             <button class="filter-btn" id="reportsDate_year" onclick="setReportsDateFilter('year')">This Year</button>
             <button class="filter-btn" id="reportsDate_custom" onclick="setReportsDateFilter('custom')">Custom</button>
+            <input type="month" id="reportsMonthPicker" class="select-pill" onchange="setReportsSpecificMonth()" title="Jump to a specific month">
           </div>
         </div>
         <div id="reportsCustomDateRow" class="form-grid" style="display:none;margin:12px 0 0;">
@@ -4356,12 +4362,13 @@
           <label>To<input id="reportsCustomTo" type="date" onchange="updateReportsCustomDates()"></label>
         </div>
       </div>
+      <div class="panel" id="reportsMonthlyComparisonPanel" style="display:none;"></div>
       <div id="reportPanel"><div class="loading-card">Loading report...</div></div>`;
   }
 
   let currentReportTab='sales';
   let reportsRawData={};
-  let reportsDateFilter={range:'all', from:'', to:''};
+  let reportsDateFilter={range:'all', from:'', to:'', month:''};
   let currentReportExport={title:'', headers:[], rows:[]};
 
   function setReportTab(tab){
@@ -4384,12 +4391,30 @@
 
   function setReportsDateFilter(range){
     reportsDateFilter.range=range;
+    reportsDateFilter.month='';
+    const monthPicker=document.getElementById('reportsMonthPicker');
+    if(monthPicker) monthPicker.value='';
     ['all','today','week','month','year','custom'].forEach(function(r){
       const el=document.getElementById('reportsDate_'+r);
       if(el) el.classList.toggle('active', r===range);
     });
     const customRow=document.getElementById('reportsCustomDateRow');
     if(customRow) customRow.style.display=range==='custom'?'grid':'none';
+    renderCurrentReportTab();
+  }
+
+  function setReportsSpecificMonth(){
+    const monthEl=document.getElementById('reportsMonthPicker');
+    const val=monthEl?monthEl.value:'';
+    if(!val) return;
+    reportsDateFilter.range='month';
+    reportsDateFilter.month=val;
+    ['all','today','week','month','year','custom'].forEach(function(r){
+      const el=document.getElementById('reportsDate_'+r);
+      if(el) el.classList.toggle('active', r==='month');
+    });
+    const customRow=document.getElementById('reportsCustomDateRow');
+    if(customRow) customRow.style.display='none';
     renderCurrentReportTab();
   }
 
@@ -4419,6 +4444,10 @@
       return d>=start && d<end;
     }
     if(range==='month'){
+      if(reportsDateFilter.month){
+        const key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+        return key===reportsDateFilter.month;
+      }
       return d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth();
     }
     if(range==='year'){
@@ -4501,6 +4530,7 @@
   function renderCurrentReportTab(){
     const panel=document.getElementById('reportPanel');
     if(!panel) return;
+    renderMonthlyComparisonPanel();
     const tab=currentReportTab;
     if(tab==='sales' || tab==='bookings') return renderSalesReport(panel);
     if(tab==='payments') return renderPaymentsReport(panel);
@@ -4508,6 +4538,78 @@
     if(tab==='expenses') return renderExpensesReport(panel);
     if(tab==='payroll') return renderPayrollReport(panel);
     if(tab==='profit') return renderProfitReport(panel);
+  }
+
+  /**
+   * Monthly Comparison is intentionally independent of the Date Filter above
+   * (which narrows the table/export to one period) - its whole purpose is to
+   * show the trend *across* months, so it always looks at the full cached
+   * dataset for the current tab rather than the currently filtered slice.
+   */
+  function reportsMonthlyComparisonSource_(){
+    const tab=currentReportTab;
+    if(tab==='sales' || tab==='bookings'){
+      return {rows:reportsRawData.bookings||[], dateField:'Event Date', label:'Sales', amount:function(b){ return Number(b['Final Amount']||b['Total Amount Due']||0); }};
+    }
+    if(tab==='payments'){
+      return {rows:reportsRawData.payments||[], dateField:'Payment Date', label:'Collected', amount:function(p){ return Number(p.Amount||0); }};
+    }
+    if(tab==='expenses'){
+      return {rows:reportsRawData.expenses||[], dateField:'Date', label:'Expenses', amount:function(e){ return Number(e.Amount||0); }};
+    }
+    return null;
+  }
+
+  function reportsMonthlyBuckets_(rows, dateField, amountFn, monthsBack){
+    const now=new Date();
+    const buckets=[];
+    for(let i=monthsBack-1;i>=0;i--){
+      const d=new Date(now.getFullYear(), now.getMonth()-i, 1);
+      buckets.push({
+        key:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'),
+        label:d.toLocaleDateString('en-PH',{month:'short',year:'2-digit'}),
+        total:0,
+        count:0
+      });
+    }
+    const bucketMap=new Map(buckets.map(function(b){ return [b.key, b]; }));
+    rows.forEach(function(r){
+      const d=new Date(r[dateField]);
+      if(isNaN(d.getTime())) return;
+      const key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+      const bucket=bucketMap.get(key);
+      if(bucket){ bucket.total+=amountFn(r); bucket.count+=1; }
+    });
+    return buckets;
+  }
+
+  function renderMonthlyComparisonPanel(){
+    const panel=document.getElementById('reportsMonthlyComparisonPanel');
+    if(!panel) return;
+    const source=reportsMonthlyComparisonSource_();
+    if(!source){ panel.style.display='none'; panel.innerHTML=''; return; }
+
+    const buckets=reportsMonthlyBuckets_(source.rows, source.dateField, source.amount, 6);
+    const maxTotal=buckets.reduce(function(m,b){ return Math.max(m,b.total); },0)||1;
+    const current=buckets[buckets.length-1];
+    const previous=buckets[buckets.length-2];
+    const delta=previous && previous.total>0
+      ? ((current.total-previous.total)/previous.total*100)
+      : (current.total>0 ? 100 : 0);
+    const deltaUp=delta>=0;
+
+    panel.style.display='';
+    panel.innerHTML=`
+      <div class="panel-head">
+        <div><div class="panel-title">Monthly Comparison</div><div class="panel-subtitle">${esc(source.label)} over the last 6 months</div></div>
+        <div class="analytics-stat"><span>vs Last Month</span><strong class="${deltaUp?'trend-up':'trend-down'}">${deltaUp?'▲':'▼'} ${Math.abs(delta).toFixed(1)}%</strong></div>
+      </div>
+      <div class="mini-bar-list">
+        ${buckets.map(function(b,i){
+          const isCurrent=i===buckets.length-1;
+          return `<div class="mini-bar-item${isCurrent?' current':''}"><span>${esc(b.label)}</span><div class="mini-bar-track"><i style="width:${Math.max(4,Math.round(b.total/maxTotal*100))}%"></i></div><strong>${money(b.total)}</strong></div>`;
+        }).join('')}
+      </div>`;
   }
 
   function renderSalesReport(panel){
