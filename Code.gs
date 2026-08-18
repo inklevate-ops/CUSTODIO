@@ -2523,7 +2523,10 @@ function saveShowUsageBatch(token, items) {
       booking: null,
       productsRows: getOrEmpty_('Products'),
       materialsRows: getOrEmpty_('Materials'),
-      inventoryRows: getOrEmpty_('Inventory')
+      inventoryRows: getOrEmpty_('Inventory'),
+      pendingUsageRows: [],
+      pendingStockOutRows: [],
+      auditEntries: []
     };
 
     for (let i = 0; i < list.length; i++) {
@@ -2539,8 +2542,17 @@ function saveShowUsageBatch(token, items) {
       const result = saveShowUsageOne_(auth, payload, true, ctx);
 
       if (!result.ok) {
-        // Earlier items in this batch already wrote successfully - recalculate
-        // the booking total for what did save before reporting the failure.
+        // Earlier items in this batch already built their BookingUsage /
+        // StockOut rows - flush those before reporting the failure so a
+        // partial batch isn't silently lost.
+        appendRows_('BookingUsage', ctx.pendingUsageRows);
+        appendRows_('StockOut', ctx.pendingStockOutRows);
+        if (ctx.auditEntries.length) {
+          audit_(auth.user, 'SHOW_USAGE_BATCH', 'Client Workspace', bookingId, {
+            bookingId:bookingId,
+            items:ctx.auditEntries
+          });
+        }
         if (saved.length && bookingId) recalculateBookingAmountFromProductUsage_(bookingId);
         return sanitizeForClient_({
           ok:false,
@@ -2552,6 +2564,20 @@ function saveShowUsageBatch(token, items) {
 
       saved.push(result);
       if (String(payload.usageType || '') === 'Product') recalcNeeded = true;
+    }
+
+    // Write every BookingUsage / StockOut row for the whole batch in one
+    // setValues() call each, instead of one appendRow_() round trip per item.
+    appendRows_('BookingUsage', ctx.pendingUsageRows);
+    appendRows_('StockOut', ctx.pendingStockOutRows);
+
+    // One consolidated audit/activity log entry for the whole batch instead
+    // of one pair of log rows per item.
+    if (ctx.auditEntries.length) {
+      audit_(auth.user, 'SHOW_USAGE_BATCH', 'Client Workspace', bookingId, {
+        bookingId:bookingId,
+        items:ctx.auditEntries
+      });
     }
 
     const bookingTotals = recalcNeeded && bookingId
@@ -2674,7 +2700,7 @@ function saveShowUsageOne_(auth, payload, skipRecalc, ctx) {
     const usageId = makeId_('USE');
     const totalCost = purchaseCost * quantity;
 
-    appendRow_('BookingUsage', {
+    const usageRow = {
       ID:usageId,
       UsageID:usageId,
       BookingID:bookingId,
@@ -2691,7 +2717,7 @@ function saveShowUsageOne_(auth, payload, skipRecalc, ctx) {
       Status:'Used',
       'Created Date':now,
       'Updated Date':now
-    });
+    };
 
     // Also record the physical stock-out transaction.
     const stockOutId = makeId_('SOUT');
@@ -2713,7 +2739,21 @@ function saveShowUsageOne_(auth, payload, skipRecalc, ctx) {
       'Created Date':now,
       'Updated Date':now
     };
-    appendRow_('StockOut', stockOut);
+
+    // A batch caller (saveShowUsageBatch) collects these rows and writes all
+    // of them for the whole batch in one setValues() call each, instead of
+    // one appendRow_() round trip per item. A single-item save (ctx has no
+    // pending arrays) writes immediately, same as before.
+    if (ctx.pendingUsageRows) {
+      ctx.pendingUsageRows.push(usageRow);
+    } else {
+      appendRow_('BookingUsage', usageRow);
+    }
+    if (ctx.pendingStockOutRows) {
+      ctx.pendingStockOutRows.push(stockOut);
+    } else {
+      appendRow_('StockOut', stockOut);
+    }
 
     // Update the Inventory row in place. `inv` is either the row we just
     // looked up or the one just created above, so this always reflects any
@@ -2735,12 +2775,25 @@ function saveShowUsageOne_(auth, payload, skipRecalc, ctx) {
       ? recalculateBookingAmountFromProductUsage_(bookingId)
       : null;
 
-    audit_(auth.user, 'SHOW_USAGE', usageType, usageId, {
-      bookingId:bookingId,
-      itemId:itemId,
-      quantity:quantity,
-      totalCost:totalCost
-    });
+    // A batch caller writes one consolidated audit/activity entry for the
+    // whole batch after the loop instead of one pair of log rows per item
+    // (each audit_() call appends to both AuditLog and ActivityLogs).
+    if (ctx.auditEntries) {
+      ctx.auditEntries.push({
+        usageType:usageType,
+        itemId:itemId,
+        itemName:String(item.Name || ''),
+        quantity:quantity,
+        totalCost:totalCost
+      });
+    } else {
+      audit_(auth.user, 'SHOW_USAGE', usageType, usageId, {
+        bookingId:bookingId,
+        itemId:itemId,
+        quantity:quantity,
+        totalCost:totalCost
+      });
+    }
 
     return {
       ok:true,
@@ -4145,6 +4198,35 @@ function appendRow_(sheetName, obj) {
   sh.appendRow(values);
 
   return Object.fromEntries(headers.map((h, i) => [h, values[i]]));
+}
+
+/**
+ * Appends several rows to a sheet with a single setValues() call instead of
+ * calling appendRow_() once per record. Each individual appendRow_() call is
+ * its own round trip to the Sheets service, so writing N records one at a
+ * time costs N round trips; this costs one regardless of N.
+ */
+function appendRows_(sheetName, records) {
+  const list = Array.isArray(records) ? records.filter(Boolean) : [];
+  if (!list.length) return;
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('No active spreadsheet found.');
+
+  const sh = ss.getSheetByName(sheetName);
+  if (!sh) throw new Error('Sheet not found: ' + sheetName);
+
+  let headers = getHeaders_(sh);
+  if (!headers.length) {
+    headers = Object.keys(list[0] || {});
+    if (!headers.length) throw new Error('No columns available for ' + sheetName + '.');
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sh.setFrozenRows(1);
+  }
+
+  const values = list.map(obj => headers.map(h => obj[h] === undefined ? '' : obj[h]));
+  const startRow = sh.getLastRow() + 1;
+  sh.getRange(startRow, 1, values.length, headers.length).setValues(values);
 }
 
 function readRows_(sheetName) {
