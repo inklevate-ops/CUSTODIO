@@ -2524,6 +2524,7 @@ function saveShowUsageBatch(token, items) {
       productsRows: getOrEmpty_('Products'),
       materialsRows: getOrEmpty_('Materials'),
       inventoryRows: getOrEmpty_('Inventory'),
+      usageRows: getOrEmpty_('BookingUsage'),
       pendingUsageRows: [],
       pendingStockOutRows: [],
       auditEntries: []
@@ -2697,29 +2698,77 @@ function saveShowUsageOne_(auth, payload, skipRecalc, ctx) {
     }
 
     const now = new Date();
-    const usageId = makeId_('USE');
+    const sellingPriceForItem = usageType === 'Product' ? number_(item['Selling Price']) : 0;
+
+    // If this item already has a usage line for this show, add to it instead
+    // of creating a duplicate row every time the same product is added again.
+    const usageRows = ctx.usageRows || getOrEmpty_('BookingUsage');
+    const existingUsage = usageRows.find(function(u){
+      return String(u.BookingID || '').trim() === bookingId &&
+        String(u.ItemID || '').trim() === itemId &&
+        String(u['Usage Type'] || '') === usageType;
+    });
+
+    // totalCost below always refers to the cost of THIS addition (used for
+    // the audit trail and the return value) - it's distinct from the usage
+    // row's own 'Total Cost' field, which reflects the full merged quantity.
     const totalCost = purchaseCost * quantity;
+    let usageId;
 
-    const usageRow = {
-      ID:usageId,
-      UsageID:usageId,
-      BookingID:bookingId,
-      'Usage Type':usageType,
-      ItemID:itemId,
-      'Item Name':String(item.Name || ''),
-      Quantity:quantity,
-      'Purchase Cost':purchaseCost,
-      'Unit Cost':purchaseCost,
-      'Selling Price':usageType === 'Product' ? number_(item['Selling Price']) : 0,
-      'Total Selling Price':usageType === 'Product' ? number_(item['Selling Price']) * quantity : 0,
-      'Total Cost':totalCost,
-      'Used Date':now,
-      Status:'Used',
-      'Created Date':now,
-      'Updated Date':now
-    };
+    if (existingUsage) {
+      usageId = String(existingUsage.ID || existingUsage.UsageID || makeId_('USE'));
+      const mergedQuantity = number_(existingUsage.Quantity) + quantity;
 
-    // Also record the physical stock-out transaction.
+      existingUsage.Quantity = mergedQuantity;
+      existingUsage['Purchase Cost'] = purchaseCost;
+      existingUsage['Unit Cost'] = purchaseCost;
+      existingUsage['Selling Price'] = sellingPriceForItem;
+      existingUsage['Total Selling Price'] = sellingPriceForItem * mergedQuantity;
+      existingUsage['Total Cost'] = purchaseCost * mergedQuantity;
+      existingUsage['Updated Date'] = now;
+      // Keep the original 'Used Date' - Beginning Stock stays anchored to
+      // when the item was first added, and Remaining Stock (beginning minus
+      // the now-merged total quantity) still reflects the current total use.
+      upsertRow_('BookingUsage', existingUsage);
+    } else {
+      usageId = makeId_('USE');
+
+      const usageRow = {
+        ID:usageId,
+        UsageID:usageId,
+        BookingID:bookingId,
+        'Usage Type':usageType,
+        ItemID:itemId,
+        'Item Name':String(item.Name || ''),
+        Quantity:quantity,
+        'Purchase Cost':purchaseCost,
+        'Unit Cost':purchaseCost,
+        'Selling Price':sellingPriceForItem,
+        'Total Selling Price':sellingPriceForItem * quantity,
+        'Total Cost':totalCost,
+        'Used Date':now,
+        Status:'Used',
+        'Created Date':now,
+        'Updated Date':now
+      };
+
+      // A batch caller (saveShowUsageBatch) collects new rows and writes all
+      // of them for the whole batch in one setValues() call each, instead of
+      // one appendRow_() round trip per item. A single-item save (ctx has no
+      // pending arrays) writes immediately, same as before.
+      if (ctx.pendingUsageRows) {
+        ctx.pendingUsageRows.push(usageRow);
+      } else {
+        appendRow_('BookingUsage', usageRow);
+      }
+      // Keep the shared cache in sync so a later item in the same batch that
+      // reuses this same product merges into it instead of duplicating it.
+      usageRows.push(usageRow);
+    }
+
+    // Always record a fresh physical stock-out transaction - it represents
+    // this specific stock movement even when the usage line above was merged
+    // into an existing one.
     const stockOutId = makeId_('SOUT');
     const stockOut = {
       ID:stockOutId,
@@ -2740,15 +2789,6 @@ function saveShowUsageOne_(auth, payload, skipRecalc, ctx) {
       'Updated Date':now
     };
 
-    // A batch caller (saveShowUsageBatch) collects these rows and writes all
-    // of them for the whole batch in one setValues() call each, instead of
-    // one appendRow_() round trip per item. A single-item save (ctx has no
-    // pending arrays) writes immediately, same as before.
-    if (ctx.pendingUsageRows) {
-      ctx.pendingUsageRows.push(usageRow);
-    } else {
-      appendRow_('BookingUsage', usageRow);
-    }
     if (ctx.pendingStockOutRows) {
       ctx.pendingStockOutRows.push(stockOut);
     } else {
@@ -2835,12 +2875,19 @@ function removeShowUsage(token, usageId) {
     const usage = findRowById_('BookingUsage', id);
     if (!usage) return {ok:false, message:'Usage record not found.'};
 
-    // Find and reverse the matching stock-out.
-    const stockOut = getOrEmpty_('StockOut').find(r =>
-      String(r.BookingID || '') === String(usage.BookingID || '') &&
-      String(r.ProductID || r.ItemID || '') === String(usage.ItemID || '') &&
-      number_(r.Quantity) === number_(usage.Quantity)
-    );
+    // Reverse every physical stock-out transaction tied to this usage line.
+    // A single BookingUsage row can represent several "Add Product" actions
+    // merged together (see saveShowUsageOne_), each of which logged its own
+    // StockOut row, so remove all of them instead of looking for one row
+    // whose quantity happens to match the merged total.
+    const stockOutIds = getOrEmpty_('StockOut')
+      .filter(r =>
+        String(r.BookingID || '') === String(usage.BookingID || '') &&
+        String(r.ProductID || r.ItemID || '') === String(usage.ItemID || '') &&
+        String(r.Reason || '') === 'Show usage'
+      )
+      .map(r => String(r.ID || ''))
+      .filter(Boolean);
 
     const inv = getOrEmpty_('Inventory').find(i =>
       String(i.ProductID || i.ItemID || '') === String(usage.ItemID || '')
@@ -2859,7 +2906,7 @@ function removeShowUsage(token, usageId) {
       upsertRow_('Inventory', inv);
     }
 
-    if (stockOut && stockOut.ID) deleteRowById_('StockOut', stockOut.ID);
+    stockOutIds.forEach(function(sid){ deleteRowById_('StockOut', sid); });
     deleteRowById_('BookingUsage', id);
 
     const bookingTotals = String(usage['Usage Type'] || '') === 'Product'
