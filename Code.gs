@@ -3921,16 +3921,26 @@ function getAllPayments(token) {
   return {ok:true, payments:getOrEmpty_('Payments')};
 }
 
-function recalculateBookingPaymentTotals_(bookingId) {
+/**
+ * knownBooking / knownPaidTotal let a caller that already has the booking
+ * row and/or already computed the new payment total (saveBookingPayment
+ * does both while validating the payment) skip re-reading the Bookings and
+ * Payments sheets here. Callers that don't have them (e.g. after deleting a
+ * payment) can omit them and this falls back to reading fresh, exactly as
+ * before.
+ */
+function recalculateBookingPaymentTotals_(bookingId, knownBooking, knownPaidTotal) {
   const id = String(bookingId || '').trim();
   if (!id) return null;
 
-  const booking = findRowById_('Bookings', id);
+  const booking = knownBooking || findRowById_('Bookings', id);
   if (!booking) return null;
 
-  const paid = getOrEmpty_('Payments')
-    .filter(function(p){ return String(p.BookingID || '').trim() === id; })
-    .reduce(function(sum, p){ return sum + number_(p.Amount); }, 0);
+  const paid = typeof knownPaidTotal === 'number'
+    ? knownPaidTotal
+    : getOrEmpty_('Payments')
+        .filter(function(p){ return String(p.BookingID || '').trim() === id; })
+        .reduce(function(sum, p){ return sum + number_(p.Amount); }, 0);
 
   const finalAmount = number_(booking['Final Amount'] ?? booking['Total Amount Due'] ?? booking['Total Amount'] ?? 0);
   const balance = Math.max(0, finalAmount - paid);
@@ -3994,7 +4004,11 @@ function saveBookingPayment(token, payload) {
     };
 
     upsertRow_('Payments', record);
-    const totals = recalculateBookingPaymentTotals_(bookingId);
+    // paidExcludingThis already excludes this exact payment's old amount (by
+    // ID), so adding the new amount gives the correct post-save total without
+    // re-reading the whole Payments sheet again, and `booking` is the same
+    // row already fetched above - both avoid redundant full-sheet reads.
+    const totals = recalculateBookingPaymentTotals_(bookingId, booking, paidExcludingThis + amount);
     audit_(auth.user, existing ? 'UPDATE' : 'CREATE', 'Payments', id, record);
 
     return sanitizeForClient_({
