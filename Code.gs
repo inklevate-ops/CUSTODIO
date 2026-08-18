@@ -862,6 +862,25 @@ function recordLoanPayment(token, payload) {
   }
 }
 
+function deleteLoan(token, loanId) {
+  const auth = requireAuth_(token);
+  if (!auth.ok) return auth;
+  const id = String(loanId || '').trim();
+  if (!id) return {ok:false, message:'Loan ID is required.'};
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const loan = findRowById_('Loans', id);
+    if (!loan) return {ok:false, message:'Loan not found.'};
+    deleteRowById_('Loans', id);
+    audit_(auth.user, 'DELETE', 'Loans', id, loan);
+    return {ok:true, message:'Loan deleted successfully.'};
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 
 
 

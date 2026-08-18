@@ -3456,7 +3456,20 @@
 
   function uiLoans(){
     return uiHeader('Loans','Track who the money came from, paid amount and balance','<button class="btn gold" onclick="openLoanForm()">+ Loan</button>')+
-      `<div class="loan-summary" id="loanSummary"></div>
+      `<div class="panel">
+        <div class="pending-toolbar">
+          <div>
+            <div class="panel-title">All Loans</div>
+            <div class="panel-subtitle">Search by lender and filter by the month borrowed.</div>
+          </div>
+          <div class="payments-toolbar-filters">
+            <div class="search-box"><span>⌕</span><input id="loansSearchInput" placeholder="Search by lender..." oninput="filterLoansModule()"></div>
+            <input type="month" id="loansMonthFilter" class="select-pill" onchange="filterLoansModule()">
+            <button class="filter-btn" type="button" onclick="clearLoansMonthFilter()">All Months</button>
+          </div>
+        </div>
+      </div>
+      <div class="loan-summary" id="loanSummary"></div>
       <div id="loanPanel"><div class="loading-card">Loading loans...</div></div>`;
   }
 
@@ -4551,56 +4564,120 @@
         panel.innerHTML='<div class="error-card">'+esc(r&&r.message||'Unable to load loans.')+'</div>'; return;
       }
       cachedLoans=r.loans||[];
-      const total=cachedLoans.reduce((s,l)=>s+Number(l['Loan Amount']||0),0);
-      const paid=cachedLoans.reduce((s,l)=>s+Number(l['Amount Paid']||0),0);
-      const outstanding=cachedLoans.reduce((s,l)=>s+Number(l['Outstanding Balance']||0),0);
-
-      const summary=document.getElementById('loanSummary');
-      if(summary) summary.innerHTML=`
-        <div class="loan-stat"><span>Total Loans</span><strong>${money(total)}</strong></div>
-        <div class="loan-stat"><span>Total Paid</span><strong>${money(paid)}</strong></div>
-        <div class="loan-stat"><span>Total Outstanding</span><strong>${money(outstanding)}</strong></div>
-      `;
-
-      panel.innerHTML=`
-        <div class="panel">
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Borrowed From</th>
-                  <th>Loan Amount</th>
-                  <th>Paid</th>
-                  <th>Outstanding</th>
-                  <th>Date Borrowed</th>
-                  <th>Due Date</th>
-                  <th>Purpose</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                ${cachedLoans.length ? cachedLoans.map(l=>`
-                  <tr>
-                    <td><strong>${esc(l.Lender)}</strong></td>
-                    <td>${money(l['Loan Amount'])}</td>
-                    <td>${money(l['Amount Paid'])}</td>
-                    <td><span class="badge ${Number(l['Outstanding Balance']||0)>0?'danger-badge':''}">${money(l['Outstanding Balance'])}</span></td>
-                    <td>${esc(formatDate(l['Date Borrowed']))}</td>
-                    <td>${esc(formatDate(l['Due Date']))}</td>
-                    <td>${esc(l.Purpose||'—')}</td>
-                    <td>
-                      <button class="table-action" onclick='recordLoanPaymentUI(${JSON.stringify(l).replace(/'/g,"&#39;")})'>Pay</button>
-                    </td>
-                  </tr>
-                `).join('') : `<tr><td colspan="8"><div class="empty-state">No loans recorded.</div></td></tr>`}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      `;
+      renderLoansModule();
     }).withFailureHandler(function(e){
       panel.innerHTML='<div class="error-card">'+esc(e&&e.message||'Unable to load loans.')+'</div>';
     }).getLoans(state.token);
+  }
+
+  function filterLoansModule(){
+    renderLoansModule();
+  }
+
+  function clearLoansMonthFilter(){
+    const monthEl=document.getElementById('loansMonthFilter');
+    if(monthEl) monthEl.value='';
+    renderLoansModule();
+  }
+
+  function loanDateMonthKey_(value){
+    const d=new Date(value);
+    if(isNaN(d.getTime())) return '';
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  }
+
+  function renderLoansModule(){
+    const panel=document.getElementById('loanPanel');
+    if(!panel) return;
+    const searchEl=document.getElementById('loansSearchInput');
+    const monthEl=document.getElementById('loansMonthFilter');
+    const search=searchEl?searchEl.value.trim().toLowerCase():'';
+    const month=monthEl?monthEl.value:'';
+
+    let rows=cachedLoans;
+    if(search) rows=rows.filter(function(l){ return String(l.Lender||'').toLowerCase().indexOf(search)!==-1; });
+    if(month) rows=rows.filter(function(l){ return loanDateMonthKey_(l['Date Borrowed'])===month; });
+
+    const total=rows.reduce((s,l)=>s+Number(l['Loan Amount']||0),0);
+    const paid=rows.reduce((s,l)=>s+Number(l['Amount Paid']||0),0);
+    const outstanding=rows.reduce((s,l)=>s+Number(l['Outstanding Balance']||0),0);
+
+    const summary=document.getElementById('loanSummary');
+    if(summary) summary.innerHTML=`
+      <div class="loan-stat"><span>Total Loans</span><strong>${money(total)}</strong></div>
+      <div class="loan-stat"><span>Total Paid</span><strong>${money(paid)}</strong></div>
+      <div class="loan-stat"><span>Total Outstanding</span><strong>${money(outstanding)}</strong></div>
+    `;
+
+    const isFiltered=!!search||!!month;
+    panel.innerHTML=`
+      <div class="panel">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Borrowed From</th>
+                <th>Loan Amount</th>
+                <th>Paid</th>
+                <th>Outstanding</th>
+                <th>Date Borrowed</th>
+                <th>Due Date</th>
+                <th>Purpose</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.length ? rows.map(l=>`
+                <tr>
+                  <td><strong>${esc(l.Lender)}</strong></td>
+                  <td>${money(l['Loan Amount'])}</td>
+                  <td>${money(l['Amount Paid'])}</td>
+                  <td><span class="badge ${Number(l['Outstanding Balance']||0)>0?'danger-badge':''}">${money(l['Outstanding Balance'])}</span></td>
+                  <td>${esc(formatDate(l['Date Borrowed']))}</td>
+                  <td>${esc(formatDate(l['Due Date']))}</td>
+                  <td>${esc(l.Purpose||'—')}</td>
+                  <td>
+                    <button class="table-action" onclick='recordLoanPaymentUI(${JSON.stringify(l).replace(/'/g,"&#39;")})'>Pay</button>
+                    <button class="table-action danger-text" onclick="confirmDeleteLoanModule('${esc(l.ID||l.LoanID||'')}')">Delete</button>
+                  </td>
+                </tr>
+              `).join('') : `<tr><td colspan="8"><div class="empty-state">${isFiltered?'No loans found for the selected filters.':'No loans recorded.'}</div></td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  function confirmDeleteLoanModule(loanId){
+    const l=cachedLoans.find(function(x){ return String(x.ID||x.LoanID||'')===String(loanId); });
+    if(!l){toast('Loan not found.');return;}
+    showDialog(`<div class="dialog-card">
+      <div class="dialog-head"><div><div class="dialog-title">Delete Loan?</div><div class="dialog-subtitle">This cannot be undone.</div></div><button class="dialog-close" onclick="closeDialog()">×</button></div>
+      <div class="void-warning">Deleting this loan will permanently remove it from the records, including its paid/outstanding history. Make sure this is intentional before continuing.</div>
+      <div class="summary-table">
+        <div><span>Borrowed From</span><strong>${esc(l.Lender||'—')}</strong></div>
+        <div><span>Loan Amount</span><strong>${money(l['Loan Amount']||0)}</strong></div>
+        <div><span>Paid</span><strong>${money(l['Amount Paid']||0)}</strong></div>
+        <div><span>Outstanding</span><strong>${money(l['Outstanding Balance']||0)}</strong></div>
+      </div>
+      <div class="dialog-actions"><span></span><button type="button" class="btn" onclick="closeDialog()">Cancel</button><button id="confirmDeleteLoanBtn" type="button" class="btn danger" onclick="executeDeleteLoanModule('${esc(l.ID||l.LoanID||'')}')">Yes, Delete Loan</button></div>
+    </div>`);
+  }
+
+  function executeDeleteLoanModule(loanId){
+    const btn=document.getElementById('confirmDeleteLoanBtn');
+    setButtonLoading(btn,true,'Deleting...');
+    google.script.run.withSuccessHandler(function(r){
+      setButtonLoading(btn,false,'Yes, Delete Loan');
+      if(!r||!r.ok){toast(r&&r.message||'Unable to delete loan.');return;}
+      closeDialog();
+      toast(r.message||'Loan deleted.');
+      loadLoans();
+    }).withFailureHandler(function(x){
+      setButtonLoading(btn,false,'Yes, Delete Loan');
+      toast(x&&x.message||'Unable to delete loan.');
+    }).deleteLoan(state.token,loanId);
   }
 
   function openLoanForm(){
