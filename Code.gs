@@ -1880,7 +1880,7 @@ function getPayrollSummary(token, payrollPeriod) {
   const processedByEmployee = new Map();
   payrollRows.forEach(p => {
     const employeeId = String(p.EmployeeID || '').trim();
-    const pPeriod = String(p['Payroll Period'] || '').trim();
+    const pPeriod = normalizePayrollPeriod_(p['Payroll Period']);
     if (employeeId && pPeriod === period) processedByEmployee.set(employeeId, p);
   });
 
@@ -1974,18 +1974,7 @@ function getPayrollSummary(token, payrollPeriod) {
       outstanding:rows.reduce((s,r) => s + number_(r['Advance / Loan Outstanding']), 0),
       employees:rows.length,
       processed:rows.filter(r => r.Processed).length
-    },
-    // TEMPORARY diagnostic data - remove once the Processed-status matching
-    // issue is confirmed fixed. Shows the raw column names and values
-    // actually being read from the Payroll sheet.
-    _debugPayrollRowKeys: payrollRows.length ? Object.keys(payrollRows[0]) : [],
-    _debugPayrollRows: payrollRows.map(function(p){
-      return {
-        EmployeeID: p.EmployeeID,
-        PayrollPeriodValue: p['Payroll Period'],
-        PayrollPeriodType: typeof p['Payroll Period']
-      };
-    })
+    }
   });
 }
 
@@ -2015,7 +2004,7 @@ function savePayroll(token, payload) {
 
   const existing = getOrEmpty_('Payroll').find(p =>
     String(p.EmployeeID || '') === employeeId &&
-    String(p['Payroll Period'] || '') === period
+    normalizePayrollPeriod_(p['Payroll Period']) === period
   );
   if (existing) {
     return {
@@ -2038,7 +2027,7 @@ function savePayroll(token, payload) {
     // Re-check duplicate after acquiring the lock.
     const latestPayroll = getOrEmpty_('Payroll').find(p =>
       String(p.EmployeeID || '') === employeeId &&
-      String(p['Payroll Period'] || '') === period
+      normalizePayrollPeriod_(p['Payroll Period']) === period
     );
     if (latestPayroll) {
       return {ok:false, message:'Payroll has already been processed for this employee for ' + period + '.'};
@@ -2075,6 +2064,10 @@ function savePayroll(token, payload) {
     };
 
     appendRow_('Payroll', payroll);
+    // appendRow_ can have Google Sheets silently reinterpret the "yyyy-MM"
+    // period string as a Date (see normalizePayrollPeriod_ above) - force it
+    // back to plain text immediately so future reads stay correct.
+    forcePayrollPeriodText_(payrollId, period);
 
     // Apply payroll deduction to outstanding salary advances / employee loans,
     // oldest first, so the employee balance decreases automatically.
@@ -4479,6 +4472,54 @@ function money_(value) {
 /* =========================
    PRIVATE HELPERS
    ========================= */
+
+/**
+ * Google Sheets can silently convert a plain "yyyy-MM" string like "2026-08"
+ * into an actual Date value (interpreted as the 1st of that month) even when
+ * written via the Apps Script API, not just when typed by a user. Once that
+ * happens, reading it back returns an ISO timestamp (via safeValue_), which
+ * never equals the plain "yyyy-MM" string every period comparison expects -
+ * breaking "already processed" detection silently. This recovers the
+ * correct "yyyy-MM" from either a clean string or a corrupted Date/ISO
+ * value, so already-affected rows keep matching correctly.
+ */
+function normalizePayrollPeriod_(value) {
+  if (value === null || value === undefined || value === '') return '';
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM');
+  }
+  const s = String(value).trim();
+  if (/^\d{4}-\d{2}$/.test(s)) return s;
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM');
+  }
+  return s;
+}
+
+/**
+ * Forces the 'Payroll Period' cell for a given Payroll row to be stored as
+ * plain text (matching the same fix already used for booking Event Time),
+ * so future reads never get silently corrupted into a Date/ISO value again.
+ */
+function forcePayrollPeriodText_(payrollId, period) {
+  const sheet = getSpreadsheet_().getSheetByName('Payroll');
+  if (!sheet || sheet.getLastRow() < 2) return;
+
+  const headers = getHeaders_(sheet);
+  const idCol = headers.indexOf('ID') + 1;
+  const periodCol = headers.indexOf('Payroll Period') + 1;
+  if (!idCol || !periodCol) return;
+
+  const ids = sheet.getRange(2, idCol, sheet.getLastRow() - 1, 1).getValues().flat();
+  const idx = ids.findIndex(v => String(v) === String(payrollId));
+  if (idx < 0) return;
+
+  const cell = sheet.getRange(idx + 2, periodCol);
+  cell.setNumberFormat('@');
+  cell.setValue(String(period));
+  cell.setNumberFormat('@');
+}
 
 function ensureColumnIfMissing_(sheet, header) {
   if (!sheet || !header) return;
