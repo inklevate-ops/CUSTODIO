@@ -2068,13 +2068,21 @@ function savePayroll(token, payload) {
       }
     }
 
-    audit_(auth.user, 'PROCESS', 'Payroll', payrollId, {
-      employeeId:employeeId,
-      payrollPeriod:period,
-      grossPay:row['Gross Pay'],
-      deduction:deduction,
-      netPay:payroll['Net Salary']
-    });
+    // The Payroll row and any advance/loan deduction above have already been
+    // written successfully at this point - an audit logging failure must
+    // never turn an otherwise-successful payroll run into a reported
+    // failure on the client.
+    try {
+      audit_(auth.user, 'PROCESS', 'Payroll', payrollId, {
+        employeeId:employeeId,
+        payrollPeriod:period,
+        grossPay:row['Gross Pay'],
+        deduction:deduction,
+        netPay:payroll['Net Salary']
+      });
+    } catch (auditError) {
+      console.warn('Payroll audit warning: ' + auditError.message);
+    }
 
     return sanitizeForClient_({
       ok:true,
