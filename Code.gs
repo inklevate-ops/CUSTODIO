@@ -333,6 +333,42 @@ function getDashboard(token) {
     return sum + pay;
   }, 0);
 
+  /**
+   * Monthly Net Profit is intentionally NOT a separate calculation. It sums
+   * each non-cancelled show's own Net Profit exactly as computed by
+   * getShowWorkspace() + the Client/Show > Profit tab formula (Revenue -
+   * Product Cost - Material Cost - Crew Cost - Expenses - Tax), for every
+   * show whose Event Date falls in the current month. This guarantees the
+   * Dashboard figure always matches each show's own Profit tab number
+   * exactly, instead of drifting from a differently-derived total.
+   */
+  const monthlyNetProfit = activeBookings.reduce((sum, b) => {
+    const eventDate = toDate_(b['Event Date'] || b['Booking Date'] || b['Created Date']);
+    if (!eventDate || Utilities.formatDate(eventDate, Session.getScriptTimeZone(), 'yyyy-MM') !== monthKey) {
+      return sum;
+    }
+
+    const bookingId = String(b.ID || b.BookingID || '').trim();
+    if (!bookingId) return sum;
+
+    // skipRecalculate=true: this is a read-only Dashboard rollup, not a show
+    // edit, so it must not trigger the write-back that a normal workspace
+    // open performs.
+    const workspace = getShowWorkspace(token, bookingId, true);
+    if (!workspace || !workspace.ok) return sum;
+
+    const showBooking = workspace.booking || {};
+    const totals = workspace.totals || {};
+    const revenue = number_(showBooking['Final Amount'] ?? showBooking['Total Amount Due'] ?? showBooking['Total Amount']);
+    const productCost = number_(totals.productCost);
+    const materialCost = number_(totals.materialCost);
+    const crewCost = number_(totals.crewCost);
+    const expenseCost = number_(totals.expenseTotal);
+    const tax = number_(showBooking.Tax);
+
+    return sum + (revenue - productCost - materialCost - crewCost - expenseCost - tax);
+  }, 0);
+
   // Count unique clients with at least one non-cancelled booking.
   // Multiple active shows for the same client count as one client.
   const activeClientKeys = new Set();
@@ -424,7 +460,7 @@ function getDashboard(token) {
       inventoryValue,
       monthlyExpenses,
       monthlyPayroll,
-      netProfit: monthlySalesTotal - monthlyExpenses - monthlyPayroll,
+      netProfit: monthlyNetProfit,
       currentYear,
       bookingMonths,
       salesMonths,
