@@ -2512,10 +2512,31 @@ function saveShowUsageBatch(token, items) {
     let bookingId = '';
     let recalcNeeded = false;
 
+    // Every item in a batch shares the same show, and almost always the same
+    // Products/Materials catalog and Inventory snapshot. Fetching those once
+    // and sharing them across all items (instead of re-reading the whole
+    // Bookings/Products/Materials/Inventory sheets for every single product)
+    // is what actually made multi-product saves slow even after batching the
+    // network round-trip into one call.
+    const ctx = {
+      bookingId: '',
+      booking: null,
+      productsRows: getOrEmpty_('Products'),
+      materialsRows: getOrEmpty_('Materials'),
+      inventoryRows: getOrEmpty_('Inventory')
+    };
+
     for (let i = 0; i < list.length; i++) {
       const payload = list[i] || {};
       bookingId = String(payload.bookingId || bookingId);
-      const result = saveShowUsageOne_(auth, payload, true);
+
+      const thisBookingId = String(payload.bookingId || '').trim();
+      if (thisBookingId && thisBookingId !== ctx.bookingId) {
+        ctx.booking = findRowById_('Bookings', thisBookingId);
+        ctx.bookingId = thisBookingId;
+      }
+
+      const result = saveShowUsageOne_(auth, payload, true, ctx);
 
       if (!result.ok) {
         // Earlier items in this batch already wrote successfully - recalculate
@@ -2554,9 +2575,16 @@ function saveShowUsageBatch(token, items) {
  * skipRecalc lets a batch caller defer the booking-total recalculation
  * (which rescans BookingUsage/Products/Payments and crew pay) until after
  * every item in the batch has been written, instead of once per item.
+ *
+ * ctx (optional) lets a batch caller share the Bookings/Products/Materials/
+ * Inventory data it already fetched across every item in the batch, instead
+ * of every single item re-reading those same sheets from scratch. When
+ * called for a single save (ctx is undefined), each lookup falls back to
+ * fetching fresh, exactly as before.
  */
-function saveShowUsageOne_(auth, payload, skipRecalc) {
+function saveShowUsageOne_(auth, payload, skipRecalc, ctx) {
   payload = payload || {};
+  ctx = ctx || {};
 
   const bookingId = String(payload.bookingId || '').trim();
   const usageType = String(payload.usageType || '').trim();
@@ -2571,11 +2599,16 @@ function saveShowUsageOne_(auth, payload, skipRecalc) {
   if (quantity <= 0) return {ok:false, message:'Quantity must be greater than zero.'};
 
   {
-    const booking = findRowById_('Bookings', bookingId);
+    const booking = ctx.booking || findRowById_('Bookings', bookingId);
     if (!booking) return {ok:false, message:'Booking / show not found.'};
 
     const masterSheet = usageType === 'Product' ? 'Products' : 'Materials';
-    const item = findRowById_(masterSheet, itemId);
+    const masterRows = usageType === 'Product'
+      ? (ctx.productsRows || getOrEmpty_('Products'))
+      : (ctx.materialsRows || getOrEmpty_('Materials'));
+    const item = masterRows.find(function(r){
+      return String(r.ID || r.ProductID || r.MaterialID || '').trim() === itemId;
+    }) || findRowById_(masterSheet, itemId);
     if (!item) return {ok:false, message:usageType + ' not found.'};
 
     const purchaseCost = usageType === 'Product'
@@ -2592,8 +2625,11 @@ function saveShowUsageOne_(auth, payload, skipRecalc) {
     // further down keeps it up to date, so a full resync is unnecessary.
 
     // Inventory uses ProductID for historical compatibility, and ItemID when
-    // the row came from the Materials master.
-    let inv = getOrEmpty_('Inventory').find(i =>
+    // the row came from the Materials master. Reuse the caller's cached
+    // Inventory snapshot when given, so a batch of N items reads the
+    // Inventory sheet once instead of N times.
+    const inventoryRows = ctx.inventoryRows || getOrEmpty_('Inventory');
+    let inv = inventoryRows.find(i =>
       String(i.ProductID || '') === itemId ||
       String(i.ItemID || '') === itemId
     );
@@ -2620,6 +2656,9 @@ function saveShowUsageOne_(auth, payload, skipRecalc) {
         'Updated Date':now
       };
       appendRow_('Inventory', inv);
+      // Keep the shared cache in sync so a later item in the same batch that
+      // uses this same product sees it as already existing.
+      inventoryRows.push(inv);
     }
 
     const available = number_(inv['Available Stock']);
@@ -2676,22 +2715,21 @@ function saveShowUsageOne_(auth, payload, skipRecalc) {
     };
     appendRow_('StockOut', stockOut);
 
-    // Update the Inventory row safely.
-    const invRows = getOrEmpty_('Inventory');
-    const currentInv = invRows.find(i => String(i.ID || '') === String(inv.ID || ''));
-    if (currentInv) {
-      currentInv['Current Stock'] = Math.max(0, number_(currentInv['Current Stock']) - quantity);
-      currentInv['Available Stock'] = Math.max(
-        0,
-        number_(currentInv['Current Stock']) - number_(currentInv['Reserved Stock'])
-      );
-      currentInv['Purchase Cost'] = number_(item['Purchase Cost']);
-      currentInv['Unit Cost'] = number_(item['Unit Cost'] ?? item['Purchase Cost']);
-      currentInv['Inventory Value'] =
-        number_(currentInv['Current Stock']) * number_(currentInv['Unit Cost']);
-      currentInv['Updated Date'] = now;
-      upsertRow_('Inventory', currentInv);
-    }
+    // Update the Inventory row in place. `inv` is either the row we just
+    // looked up or the one just created above, so this always reflects any
+    // earlier items in the same batch that already touched this product.
+    inv['Current Stock'] = Math.max(0, number_(inv['Current Stock']) - quantity);
+    inv['Available Stock'] = Math.max(
+      0,
+      number_(inv['Current Stock']) - number_(inv['Reserved Stock'])
+    );
+    inv['Purchase Cost'] = number_(item['Purchase Cost']);
+    inv['Unit Cost'] = number_(item['Unit Cost'] ?? item['Purchase Cost']);
+    inv['Inventory Value'] =
+      number_(inv['Current Stock']) * number_(inv['Unit Cost']);
+    inv['Updated Date'] = now;
+    upsertRow_('Inventory', inv);
+    const currentInv = inv;
 
     const bookingTotals = (!skipRecalc && usageType === 'Product')
       ? recalculateBookingAmountFromProductUsage_(bookingId)
