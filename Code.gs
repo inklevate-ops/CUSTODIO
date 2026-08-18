@@ -4000,7 +4000,23 @@ function makeId_(prefix) {
 function getAllPayments(token) {
   const auth = requireAuth_(token);
   if (!auth.ok) return auth;
-  return {ok:true, payments:getOrEmpty_('Payments')};
+
+  // Attach the client name from the linked booking so the Payments module
+  // can search/display by client, without needing a separate round-trip.
+  const bookingMap = new Map();
+  getOrEmpty_('Bookings').forEach(function(b){
+    const id = String(b.ID || b.BookingID || '').trim();
+    if (id) bookingMap.set(id, b);
+  });
+
+  const payments = getOrEmpty_('Payments').map(function(p){
+    const booking = bookingMap.get(String(p.BookingID || '').trim());
+    const copy = Object.assign({}, p);
+    copy.ClientName = booking ? String(booking['Client Name'] || '') : '';
+    return copy;
+  });
+
+  return {ok:true, payments:payments};
 }
 
 /**

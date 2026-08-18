@@ -165,6 +165,17 @@
       font-weight:800;
     }
 
+    .btn.danger{
+      border-color:#6d3838;
+      background:#1a0f0f;
+      color:#ff9e9e;
+    }
+
+    .btn.danger:hover{
+      border-color:#8a4747;
+      background:#231212;
+    }
+
     .btn.loading{
       display:flex;
       justify-content:center;
@@ -468,6 +479,7 @@
 
 
     .pending-client-panel{padding:16px}.pending-toolbar{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px}.pending-badge{color:#e9b95e;background:rgba(215,173,85,.12)}
+    .void-warning{padding:12px 14px;border:1px solid #6d3838;background:rgba(180,60,60,.1);color:#ff9e9e;border-radius:12px;font-size:12px;margin-bottom:14px}
     @media(max-width:700px){.pending-toolbar{flex-direction:column}.pending-toolbar .search-box{width:100%}}
     .form-grid input[type="date"],.form-grid input[type="time"]{color-scheme:dark}
 
@@ -3890,9 +3902,20 @@
     }).withFailureHandler(function(x){toast(x&&x.message||'Unable to record payment.');}).recordEmployeeAdvancePayment(state.token,{advanceId:advanceId,amount:amount});
   }
 
+  let paymentsRows=[];
+
   function uiPayments(){
     return uiHeader('Payments','Track received payments and outstanding balances','<button class="btn" onclick="loadPaymentsModule()">Refresh</button>')+
-      `<div class="stat-strip" id="paymentsStats"><div class="loading-card">Loading payment totals...</div></div><div id="paymentsModuleList"><div class="loading-card">Loading payments...</div></div>`;
+      `<div class="panel">
+        <div class="pending-toolbar">
+          <div>
+            <div class="panel-title">All Payments</div>
+            <div class="panel-subtitle">Search transactions by client name.</div>
+          </div>
+          <div class="search-box"><span>⌕</span><input id="paymentsSearchInput" placeholder="Search by client name..." oninput="filterPaymentsModule()"></div>
+        </div>
+      </div>
+      <div class="stat-strip" id="paymentsStats"><div class="loading-card">Loading payment totals...</div></div><div id="paymentsModuleList"><div class="loading-card">Loading payments...</div></div>`;
   }
 
   function loadPaymentsModule(){
@@ -3901,12 +3924,62 @@
     box.innerHTML='<div class="loading-card">Loading payments...</div>';
     google.script.run.withSuccessHandler(function(r){
       if(!r||!r.ok){box.innerHTML='<div class="error-card">'+esc(r&&r.message||'Unable to load payments.')+'</div>';return;}
-      const rows=(r.payments||[]).slice().sort(function(a,b){ return (new Date(b['Payment Date']||0)) - (new Date(a['Payment Date']||0)); });
-      const total=rows.reduce((s,p)=>s+Number(p.Amount||0),0);
-      const stats=document.getElementById('paymentsStats');
-      if(stats) stats.innerHTML=`${uiStat('Total Collected',money(total))}${uiStat('Transactions',rows.length)}`;
-      box.innerHTML=rows.length?`<div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Booking</th><th>Milestone</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th></tr></thead><tbody>${rows.map(p=>`<tr><td>${esc(formatDate(p['Payment Date']))}</td><td>${esc(p.BookingID||'—')}</td><td>${esc(p.Milestone||'Payment')}</td><td>${money(p.Amount||0)}</td><td>${esc(p.Method||'')}</td><td>${esc(p.Reference||'')}</td><td><span class="badge">${esc(p.Status||'Completed')}</span></td></tr>`).join('')}</tbody></table></div></div>`:'<div class="panel"><div class="empty-state">No payments recorded.</div></div>';
+      paymentsRows=(r.payments||[]).slice().sort(function(a,b){ return (new Date(b['Payment Date']||0)) - (new Date(a['Payment Date']||0)); });
+      renderPaymentsModule();
     }).withFailureHandler(function(e){box.innerHTML='<div class="error-card">'+esc(e&&e.message||'Unable to load payments.')+'</div>';}).getAllPayments(state.token);
+  }
+
+  function filterPaymentsModule(){
+    renderPaymentsModule();
+  }
+
+  function renderPaymentsModule(){
+    const box=document.getElementById('paymentsModuleList');
+    if(!box) return;
+    const searchEl=document.getElementById('paymentsSearchInput');
+    const search=searchEl?searchEl.value.trim().toLowerCase():'';
+    const rows=search
+      ? paymentsRows.filter(function(p){ return String(p.ClientName||'').toLowerCase().indexOf(search)!==-1; })
+      : paymentsRows;
+    const total=rows.reduce((s,p)=>s+Number(p.Amount||0),0);
+    const stats=document.getElementById('paymentsStats');
+    if(stats) stats.innerHTML=`${uiStat('Total Collected',money(total))}${uiStat('Transactions',rows.length)}`;
+    box.innerHTML=rows.length?`<div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Booking</th><th>Client</th><th>Milestone</th><th>Amount</th><th>Method</th><th>Reference</th><th>Status</th><th>Action</th></tr></thead><tbody>${rows.map(function(p){
+      const pid=esc(p.ID||p.PaymentID||'');
+      return `<tr><td>${esc(formatDate(p['Payment Date']))}</td><td>${esc(p.BookingID||'—')}</td><td>${esc(p.ClientName||'—')}</td><td>${esc(p.Milestone||'Payment')}</td><td>${money(p.Amount||0)}</td><td>${esc(p.Method||'')}</td><td>${esc(p.Reference||'')}</td><td><span class="badge">${esc(p.Status||'Completed')}</span></td><td><button class="table-action danger-text" onclick="confirmDeletePaymentModule('${pid}')">Delete</button></td></tr>`;
+    }).join('')}</tbody></table></div></div>`:`<div class="panel"><div class="empty-state">${search?'No payments found for that client.':'No payments recorded.'}</div></div>`;
+  }
+
+  function confirmDeletePaymentModule(paymentId){
+    const p=paymentsRows.find(function(x){ return String(x.ID||x.PaymentID||'')===String(paymentId); });
+    if(!p){toast('Payment not found.');return;}
+    showDialog(`<div class="dialog-card">
+      <div class="dialog-head"><div><div class="dialog-title">Delete Payment?</div><div class="dialog-subtitle">This cannot be undone.</div></div><button class="dialog-close" onclick="closeDialog()">×</button></div>
+      <div class="void-warning">Deleting this payment will permanently remove it and recalculate the booking's balance. Make sure this is intentional before continuing.</div>
+      <div class="summary-table">
+        <div><span>Booking</span><strong>${esc(p.BookingID||'—')}</strong></div>
+        <div><span>Client</span><strong>${esc(p.ClientName||'—')}</strong></div>
+        <div><span>Amount</span><strong>${money(p.Amount||0)}</strong></div>
+        <div><span>Date</span><strong>${esc(formatDate(p['Payment Date']))}</strong></div>
+      </div>
+      <div class="dialog-actions"><span></span><button type="button" class="btn" onclick="closeDialog()">Cancel</button><button id="confirmDeletePaymentBtn" type="button" class="btn danger" onclick="executeDeletePaymentModule('${esc(p.ID||p.PaymentID||'')}')">Yes, Delete Payment</button></div>
+    </div>`);
+  }
+
+  function executeDeletePaymentModule(paymentId){
+    const btn=document.getElementById('confirmDeletePaymentBtn');
+    setButtonLoading(btn,true,'Deleting...');
+    google.script.run.withSuccessHandler(function(r){
+      setButtonLoading(btn,false,'Yes, Delete Payment');
+      if(!r||!r.ok){toast(r&&r.message||'Unable to delete payment.');return;}
+      closeDialog();
+      toast(r.message||'Payment deleted.');
+      loadPaymentsModule();
+      if(typeof loadDashboard==='function' && currentOpenModule==='Dashboard') loadDashboard();
+    }).withFailureHandler(function(x){
+      setButtonLoading(btn,false,'Yes, Delete Payment');
+      toast(x&&x.message||'Unable to delete payment.');
+    }).deleteBookingPayment(state.token,paymentId);
   }
 
   function uiExpenses(){
