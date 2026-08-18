@@ -4006,9 +4006,24 @@
     }).deleteBookingPayment(state.token,paymentId);
   }
 
+  let expensesRows=[];
+
   function uiExpenses(){
     return uiHeader('Expenses','Event and operating expenses','<button class="btn" onclick="loadExpensesModule()">Refresh</button>')+
-      `<div class="stat-strip" id="expensesStats"><div class="loading-card">Loading expense totals...</div></div><div id="expensesModuleList"><div class="loading-card">Loading expenses...</div></div>`;
+      `<div class="panel">
+        <div class="pending-toolbar">
+          <div>
+            <div class="panel-title">All Expenses</div>
+            <div class="panel-subtitle">Search by client name and filter by month.</div>
+          </div>
+          <div class="payments-toolbar-filters">
+            <div class="search-box"><span>⌕</span><input id="expensesSearchInput" placeholder="Search by client name..." oninput="filterExpensesModule()"></div>
+            <input type="month" id="expensesMonthFilter" class="select-pill" onchange="filterExpensesModule()">
+            <button class="filter-btn" type="button" onclick="clearExpensesMonthFilter()">All Months</button>
+          </div>
+        </div>
+      </div>
+      <div class="stat-strip" id="expensesStats"><div class="loading-card">Loading expense totals...</div></div><div id="expensesModuleList"><div class="loading-card">Loading expenses...</div></div>`;
   }
 
   function loadExpensesModule(){
@@ -4017,12 +4032,79 @@
     box.innerHTML='<div class="loading-card">Loading expenses...</div>';
     google.script.run.withSuccessHandler(function(r){
       if(!r||!r.ok){box.innerHTML='<div class="error-card">'+esc(r&&r.message||'Unable to load expenses.')+'</div>';return;}
-      const rows=(r.expenses||[]).slice().sort(function(a,b){ return (new Date(b.Date||0)) - (new Date(a.Date||0)); });
-      const total=rows.reduce((s,e)=>s+Number(e.Amount||0),0);
-      const stats=document.getElementById('expensesStats');
-      if(stats) stats.innerHTML=`${uiStat('Total Expenses',money(total))}${uiStat('Transactions',rows.length)}`;
-      box.innerHTML=rows.length?`<div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Booking</th><th>Category</th><th>Description</th><th>Amount</th></tr></thead><tbody>${rows.map(e=>`<tr><td>${esc(formatDate(e.Date))}</td><td>${esc(e.BookingID||'—')}</td><td>${esc(e.Category||'Other')}</td><td>${esc(e.Description||'')}</td><td>${money(e.Amount||0)}</td></tr>`).join('')}</tbody></table></div></div>`:'<div class="panel"><div class="empty-state">No expenses recorded.</div></div>';
+      expensesRows=(r.expenses||[]).slice().sort(function(a,b){ return (new Date(b.Date||0)) - (new Date(a.Date||0)); });
+      renderExpensesModule();
     }).withFailureHandler(function(e){box.innerHTML='<div class="error-card">'+esc(e&&e.message||'Unable to load expenses.')+'</div>';}).getAllExpenses(state.token);
+  }
+
+  function filterExpensesModule(){
+    renderExpensesModule();
+  }
+
+  function clearExpensesMonthFilter(){
+    const monthEl=document.getElementById('expensesMonthFilter');
+    if(monthEl) monthEl.value='';
+    renderExpensesModule();
+  }
+
+  function expenseDateMonthKey_(value){
+    const d=new Date(value);
+    if(isNaN(d.getTime())) return '';
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  }
+
+  function renderExpensesModule(){
+    const box=document.getElementById('expensesModuleList');
+    if(!box) return;
+    const searchEl=document.getElementById('expensesSearchInput');
+    const monthEl=document.getElementById('expensesMonthFilter');
+    const search=searchEl?searchEl.value.trim().toLowerCase():'';
+    const month=monthEl?monthEl.value:'';
+
+    let rows=expensesRows;
+    if(search) rows=rows.filter(function(e){ return String(e.ClientName||'').toLowerCase().indexOf(search)!==-1; });
+    if(month) rows=rows.filter(function(e){ return expenseDateMonthKey_(e.Date)===month; });
+
+    const total=rows.reduce((s,e)=>s+Number(e.Amount||0),0);
+    const stats=document.getElementById('expensesStats');
+    if(stats) stats.innerHTML=`${uiStat('Total Expenses',money(total))}${uiStat('Transactions',rows.length)}`;
+    const isFiltered=!!search||!!month;
+    box.innerHTML=rows.length?`<div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Booking</th><th>Client</th><th>Category</th><th>Description</th><th>Amount</th><th>Action</th></tr></thead><tbody>${rows.map(function(e){
+      const eid=esc(e.ID||e.ExpenseID||'');
+      return `<tr><td>${esc(formatDate(e.Date))}</td><td>${esc(e.BookingID||'—')}</td><td>${esc(e.ClientName||'—')}</td><td>${esc(e.Category||'Other')}</td><td>${esc(e.Description||'')}</td><td>${money(e.Amount||0)}</td><td><button class="table-action danger-text" onclick="confirmDeleteExpenseModule('${eid}')">Delete</button></td></tr>`;
+    }).join('')}</tbody></table></div></div>`:`<div class="panel"><div class="empty-state">${isFiltered?'No expenses found for the selected filters.':'No expenses recorded.'}</div></div>`;
+  }
+
+  function confirmDeleteExpenseModule(expenseId){
+    const e=expensesRows.find(function(x){ return String(x.ID||x.ExpenseID||'')===String(expenseId); });
+    if(!e){toast('Expense not found.');return;}
+    showDialog(`<div class="dialog-card">
+      <div class="dialog-head"><div><div class="dialog-title">Delete Expense?</div><div class="dialog-subtitle">This cannot be undone.</div></div><button class="dialog-close" onclick="closeDialog()">×</button></div>
+      <div class="void-warning">Deleting this expense will permanently remove it from the records. Make sure this is intentional before continuing.</div>
+      <div class="summary-table">
+        <div><span>Booking</span><strong>${esc(e.BookingID||'—')}</strong></div>
+        <div><span>Client</span><strong>${esc(e.ClientName||'—')}</strong></div>
+        <div><span>Category</span><strong>${esc(e.Category||'Other')}</strong></div>
+        <div><span>Amount</span><strong>${money(e.Amount||0)}</strong></div>
+      </div>
+      <div class="dialog-actions"><span></span><button type="button" class="btn" onclick="closeDialog()">Cancel</button><button id="confirmDeleteExpenseBtn" type="button" class="btn danger" onclick="executeDeleteExpenseModule('${esc(e.ID||e.ExpenseID||'')}')">Yes, Delete Expense</button></div>
+    </div>`);
+  }
+
+  function executeDeleteExpenseModule(expenseId){
+    const btn=document.getElementById('confirmDeleteExpenseBtn');
+    setButtonLoading(btn,true,'Deleting...');
+    google.script.run.withSuccessHandler(function(r){
+      setButtonLoading(btn,false,'Yes, Delete Expense');
+      if(!r||!r.ok){toast(r&&r.message||'Unable to delete expense.');return;}
+      closeDialog();
+      toast(r.message||'Expense deleted.');
+      loadExpensesModule();
+      if(typeof loadDashboard==='function' && currentOpenModule==='Dashboard') loadDashboard();
+    }).withFailureHandler(function(x){
+      setButtonLoading(btn,false,'Yes, Delete Expense');
+      toast(x&&x.message||'Unable to delete expense.');
+    }).deleteShowExpense(state.token,expenseId);
   }
 
   function uiDocuments(){

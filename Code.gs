@@ -4163,7 +4163,23 @@ function deleteBookingPayment(token, paymentId) {
 function getAllExpenses(token) {
   const auth = requireAuth_(token);
   if (!auth.ok) return auth;
-  return {ok:true, expenses:getOrEmpty_('Expenses')};
+
+  // Attach the client name from the linked booking so the Expenses module
+  // can search/display by client, matching the Payments module.
+  const bookingMap = new Map();
+  getOrEmpty_('Bookings').forEach(function(b){
+    const id = String(b.ID || b.BookingID || '').trim();
+    if (id) bookingMap.set(id, b);
+  });
+
+  const expenses = getOrEmpty_('Expenses').map(function(e){
+    const booking = bookingMap.get(String(e.BookingID || '').trim());
+    const copy = Object.assign({}, e);
+    copy.ClientName = booking ? String(booking['Client Name'] || '') : '';
+    return copy;
+  });
+
+  return {ok:true, expenses:expenses};
 }
 
 function saveShowExpense(token, payload) {
