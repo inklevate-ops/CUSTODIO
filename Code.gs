@@ -2512,7 +2512,11 @@ function saveShowUsage(token, payload) {
       ? number_(item['Selling Cost'])
       : 0;
 
-    syncInventoryRecords_();
+    // Do NOT call syncInventoryRecords_() here - it rescans every product and
+    // every Stock In / Stock Out row on every single usage save, which made
+    // adding a product to a show noticeably slow. The block below already
+    // ensures an inventory row exists for this specific item, and the write
+    // further down keeps it up to date, so a full resync is unnecessary.
 
     // Inventory uses ProductID for historical compatibility, and ItemID when
     // the row came from the Materials master.
