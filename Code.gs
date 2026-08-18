@@ -745,14 +745,45 @@ function deleteRowById_(sheetName, id) {
 function getLoans(token) {
   const auth = requireAuth_(token);
   if (!auth.ok) return auth;
+
+  // Loan payments are stored in the Payments sheet with the loan ID in
+  // Reference. Group them once so every loan can expose both its full
+  // payment history and the date it was most recently paid.
+  const paymentHistoryByLoan = new Map();
+  getOrEmpty_('Payments').forEach(function(p){
+    const loanId = String(p.Reference || '').trim();
+    const milestone = String(p.Milestone || '').trim().toLowerCase();
+    if (!loanId || milestone !== 'loan payment') return;
+
+    const history = paymentHistoryByLoan.get(loanId) || [];
+    history.push({
+      ID:String(p.ID || p.PaymentID || ''),
+      Date:p['Payment Date'] || '',
+      Amount:number_(p.Amount),
+      Method:String(p.Method || ''),
+      Status:String(p.Status || 'Completed')
+    });
+    paymentHistoryByLoan.set(loanId, history);
+  });
+
+  paymentHistoryByLoan.forEach(function(history){
+    history.sort(function(a, b){
+      return (toDate_(b.Date) || 0) - (toDate_(a.Date) || 0);
+    });
+  });
+
   const loans = getOrEmpty_('Loans').map(l => {
+    const loanId = String(l.ID || l.LoanID || '').trim();
+    const paymentHistory = paymentHistoryByLoan.get(loanId) || [];
     const amount = number_(l['Loan Amount']);
     const paid = number_(l['Amount Paid']);
     return Object.assign({}, l, {
       'Loan Amount': amount,
       'Loan Percentage': number_(l['Loan Percentage']),
       'Amount Paid': paid,
-      'Outstanding Balance': Math.max(0, amount - paid)
+      'Outstanding Balance': Math.max(0, amount - paid),
+      'Last Payment Date': paymentHistory.length ? paymentHistory[0].Date : '',
+      'Payment History': paymentHistory
     });
   });
   return {ok:true, loans:loans};
