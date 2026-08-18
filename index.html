@@ -330,7 +330,7 @@
     .metric-label{font-size:11px;color:#858585}
     .metric-value{font-size:23px;font-weight:800;margin-top:7px}
     .dashboard-columns{display:grid;grid-template-columns:1.35fr .95fr;gap:16px;margin-bottom:16px}
-    .panel{padding:18px;border:1px solid #2a2a2a;border-radius:17px;background:linear-gradient(180deg,#131313,#101010);margin-bottom:16px;min-width:0}
+    .panel{padding:18px;border:1px solid #2a2a2a;border-radius:17px;background:linear-gradient(180deg,#131313,#101010);margin-bottom:16px}
     .panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
     .panel-title{font-weight:800}
     .panel-subtitle{font-size:11px;color:#777;margin-top:3px}
@@ -358,7 +358,7 @@
       .dashboard-columns{grid-template-columns:1fr}
     }
     .menu-toggle{display:none;border:1px solid #2b2b2b;background:#131313;color:#eee;width:38px;height:38px;border-radius:10px;align-items:center;justify-content:center;font-size:18px;flex:0 0 auto}
-    .sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(3px);z-index:99}
+    .sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99}
     @media(max-width:800px){
       .app-shell{grid-template-columns:1fr}
       .sidebar{position:fixed;top:0;left:-270px;z-index:100;width:250px;transition:.2s ease}
@@ -512,12 +512,7 @@
 
 
     .show-list-row-wrap{position:relative;display:grid;grid-template-columns:1fr auto;gap:5px;align-items:center}
-    .show-list-row-wrap .show-list-row{min-width:0}
-    .show-row-actions{display:flex;gap:4px;padding-right:2px;flex-wrap:wrap;justify-content:flex-end;min-width:0}
-    @media(max-width:360px){
-      .show-list-row-wrap{grid-template-columns:1fr}
-      .show-row-actions{justify-content:flex-start;padding:0 2px}
-    }
+    .show-row-actions{display:flex;gap:4px;padding-right:2px}
     .show-row-actions .table-action{font-size:9px}
 
 
@@ -679,15 +674,6 @@
     .show-row-actions .table-action{font-size:13px !important}
     .pending-actions .btn{font-size:14px !important}
 
-    /* Grid/flex items don't shrink below their content's intrinsic width by
-       default (e.g. a table with min-width:560px inside a card), which was
-       pushing the whole page wider than the viewport on narrow screens.
-       min-width:0 lets these cards actually shrink to their grid/flex track
-       and defer to their own internal overflow:auto scrolling instead. */
-    .metric-card,.mini-stat,.workspace-stat,.doc-card,.settings-card,
-    .stock-card,.analytics-card,.workspace-section-card,.loan-stat,
-    .detail-grid>div,.summary-table>div{min-width:0}
-
   </style>
 </head>
 
@@ -696,6 +682,121 @@
 <div id="app"></div>
 
 <script>
+(function(){
+  function makeRow(overrides){ return Object.assign({}, overrides); }
+
+  const bookings = [
+    makeRow({ID:'BKG1', BookingID:'BKG1', 'Client Name':'Juan Dela Cruz', 'Event Name':'Wedding Reception', 'Event Type':'Wedding', 'Event Date':'2026-08-20', 'Event Time':'7:00 PM', Location:'Manila', 'Final Amount':125000, 'Total Amount Due':125000, Tax:5000, 'Payment Status':'Partial', 'Booking Status':'Booked', 'Paid Amount':50000, 'Down Payment':50000, Balance:75000, Subtotal:120000}),
+    makeRow({ID:'BKG2', BookingID:'BKG2', 'Client Name':'Maria Santos', 'Event Name':'Birthday Bash', 'Event Type':'Birthday', 'Event Date':'2026-08-25', 'Event Time':'6:00 PM', Location:'Quezon City', 'Final Amount':45000, 'Total Amount Due':45000, Tax:2000, 'Payment Status':'Paid', 'Booking Status':'Booked', 'Paid Amount':45000, Balance:0, Subtotal:43000}),
+    makeRow({ID:'BKG3', BookingID:'BKG3', 'Client Name':'Pedro Reyes', 'Event Name':'Fiesta', 'Event Type':'Festival', 'Event Date':'2026-07-10', 'Event Time':'8:00 PM', Location:'Cavite', 'Final Amount':18000, 'Total Amount Due':18000, Tax:900, 'Payment Status':'Unpaid', 'Booking Status':'Pending', 'Paid Amount':0, Balance:18000, Subtotal:17100}),
+  ];
+
+  const products = [
+    makeRow({ID:'P1', ProductID:'P1', Name:'Sky Rocket Deluxe', Category:'Fireworks', Unit:'pcs', Source:'Local', 'Purchase Cost':50, 'Unit Cost':50, 'Selling Price':100, 'Minimum Stock':10, Status:'Active'}),
+    makeRow({ID:'P2', ProductID:'P2', Name:'Sparkler Pack', Category:'Firecrackers', Unit:'box', Source:'Local', 'Purchase Cost':20, 'Unit Cost':20, 'Selling Price':35, 'Minimum Stock':20, Status:'Active'}),
+  ];
+
+  const employees = [
+    makeRow({ID:'E1', EmployeeID:'E1', 'Employee Name':'Carlos Dizon', Role:'Shooter', 'Employee Type':'Regular', 'Contact Number':'0917xxxxxxx', Status:'Active', ShowsThisMonth:3, ShowPayThisMonth:9000, Loans:0}),
+    makeRow({ID:'E2', EmployeeID:'E2', 'Employee Name':'Ana Cruz', Role:'Owner', 'Employee Type':'Owner', 'Contact Number':'0918xxxxxxx', Status:'Active', ShowsThisMonth:2, ShowPayThisMonth:16000, Loans:0}),
+  ];
+
+  const loans = [
+    makeRow({ID:'L1', LoanID:'L1', Lender:'Pedro Uy', 'Loan Amount':50000, 'Loan Percentage':5, 'Amount Paid':10000, 'Outstanding Balance':40000, 'Date Borrowed':'2026-07-01', 'Due Date':'2026-12-01', Purpose:'Equipment', 'Last Payment Date':'2026-08-01', 'Payment History':[{ID:'LP1', Date:'2026-08-01', Amount:10000, Method:'Cash', Status:'Completed'}]}),
+  ];
+
+  const payments = [
+    makeRow({ID:'PAY1', PaymentID:'PAY1', BookingID:'BKG1', ClientName:'Juan Dela Cruz', 'Payment Date':'2026-08-05', Milestone:'Down Payment', Amount:50000, Method:'GCash', Reference:'GC-99213', Status:'Completed'}),
+  ];
+
+  const expenses = [
+    makeRow({ID:'EX1', ExpenseID:'EX1', BookingID:'BKG1', ClientName:'Juan Dela Cruz', Date:'2026-08-06', Category:'Transport', Amount:3500}),
+  ];
+
+  const documents = [
+    makeRow({ID:'DOC1', DocumentID:'DOC1', Category:'Contracts', FileName:'wedding-contract.pdf', ClientName:'Juan Dela Cruz', BookingID:'BKG1', FileSize:204800, DriveUrl:'#', 'Created Date':'2026-08-01'}),
+  ];
+
+  const inventory = [
+    makeRow({ID:'INV1', InventoryID:'INV1', ProductID:'P1', 'Product Name':'Sky Rocket Deluxe', 'Current Stock':120, 'Available Stock':110, 'Minimum Stock':10, 'Unit Cost':50, 'Purchase Cost':50, 'Selling Price':100, 'Inventory Value':6000}),
+  ];
+
+  const dashboardMetrics = {
+    totalBookings:3, totalBooked:2, totalPending:1, upcomingEvents:2, todaysEvents:0, totalClients:3, totalSuppliers:2,
+    totalProducts:2, lowStockItems:1, totalSales:188000, monthlySalesTotal:170000, amountCollected:95000, outstandingBalance:93000,
+    inventoryValue:6000, monthlyExpenses:3500, monthlyPayroll:16000, netProfit:86000, currentYear:2026,
+    bookingMonths:[{month:'Jan',count:1},{month:'Feb',count:0},{month:'Mar',count:2},{month:'Apr',count:1},{month:'May',count:0},{month:'Jun',count:2},{month:'Jul',count:1},{month:'Aug',count:2},{month:'Sep',count:0},{month:'Oct',count:0},{month:'Nov',count:0},{month:'Dec',count:0}],
+    salesMonths:[{month:'Jan',sales:40000},{month:'Feb',sales:0},{month:'Mar',sales:60000},{month:'Apr',sales:30000},{month:'May',sales:0},{month:'Jun',sales:70000},{month:'Jul',sales:18000},{month:'Aug',sales:170000},{month:'Sep',sales:0},{month:'Oct',sales:0},{month:'Nov',sales:0},{month:'Dec',sales:0}],
+    bestBookingMonth:{month:'Aug',count:2}, slowestBookingMonth:{month:'Feb',count:0},
+    bestSalesMonth:{month:'Aug',sales:170000}, slowestSalesMonth:{month:'Feb',sales:0}, totalYearSales:388000
+  };
+
+  const defaultResponses = {
+    login: function(){ return {ok:true, token:'mock-token', user:{'Full Name':'Admin User', Role:'Admin'}}; },
+    validateSession: function(){ return {ok:true, user:{'Full Name':'Admin User', Role:'Admin'}}; },
+    pingServer: function(){ return {ok:true}; },
+    logout: function(){ return {ok:true}; },
+    getDashboard: function(){ return {ok:true, user:'Admin', metrics:dashboardMetrics, upcoming:bookings.slice(0,2), lowStock:[{ID:'P2','Product Name':'Sparkler Pack','Available Stock':5,'Minimum Stock':20}], recentActivity:[]}; },
+    getBookings: function(){ return {ok:true, bookings:bookings}; },
+    getPendingClients: function(){ return {ok:true, bookings:[]}; },
+    getProducts: function(){ return {ok:true, products:products}; },
+    getInventory: function(){ return {ok:true, inventory:inventory}; },
+    getEmployees: function(){ return {ok:true, employees:employees}; },
+    getLoans: function(){ return {ok:true, loans:loans}; },
+    getAllPayments: function(){ return {ok:true, payments:payments}; },
+    getAllExpenses: function(){ return {ok:true, expenses:expenses}; },
+    getDocuments: function(){ return {ok:true, documents:documents, categoryCounts:{Contracts:1}}; },
+    getSettings: function(){ return {ok:true, settings:{companyName:'Custodio Suplico Fireworks', companyContact:'0900-000-0000', companyAddress:'Manila, PH', version:'1.0.0'}}; },
+    getNotifications: function(){ return {ok:true, notifications:[{type:'payment', title:'Balance due soon', subtitle:'Juan Dela Cruz - Wedding Reception', time:'2026-08-19'}]}; },
+    getPayrollSummary: function(){ return {ok:true, period:'2026-08', rows:[{EmployeeID:'E1','Employee Name':'Carlos Dizon',Role:'Shooter',Shows:3,'Gross Pay':9000,'Net Pay':9000,Status:'Ready'}], totals:{gross:9000, net:9000, employees:1, processed:0, deductions:0, outstanding:0}}; },
+    getCalendarData: function(){ return {ok:true, events:bookings.map(function(b){ return {id:b.ID, type:'booking', title:b['Event Name'], client:b['Client Name'], date:b['Event Date'], amount:b['Final Amount'], balance:b.Balance}; })}; },
+    getShowWorkspace: function(){ return {ok:true, client:{Name:'Juan Dela Cruz', Phone:'0917xxxxxxx'}, booking:bookings[0], eventTime:'7:00 PM', usage:[], crew:[], payments:payments, expenses:expenses, totals:{productCost:5000, materialCost:2000, crewCost:16000, expenseTotal:3500}}; }
+  };
+
+  function defaultFallback(methodName, args){
+    console.warn('[mock] unhandled RPC call, returning generic ok response:', methodName, args);
+    return {ok:true};
+  }
+
+  function mockResponse(methodName, args){
+    const handler = defaultResponses[methodName];
+    if(handler) return handler(args);
+    return defaultFallback(methodName, args);
+  }
+
+  function createRunProxy(){
+    const handlers = {};
+    const proxy = {
+      withSuccessHandler: function(fn){ handlers.success = fn; return proxy; },
+      withFailureHandler: function(fn){ handlers.failure = fn; return proxy; }
+    };
+    return new Proxy(proxy, {
+      get: function(target, prop){
+        if(prop in target) return target[prop];
+        return function(){
+          const args = Array.prototype.slice.call(arguments);
+          setTimeout(function(){
+            try {
+              const data = mockResponse(prop, args);
+              if(handlers.success) handlers.success(data);
+            } catch(e){
+              console.error('[mock] error handling', prop, e);
+              if(handlers.failure) handlers.failure({message:String(e && e.message || e)});
+            }
+          }, 120);
+          return proxy;
+        };
+      }
+    });
+  }
+
+  window.google = {
+    script: {
+      get run(){ return createRunProxy(); }
+    }
+  };
+})();
+
   const state = {
     token: localStorage.getItem('csf_phase1_token') || '',
     user: null
