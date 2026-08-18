@@ -77,6 +77,7 @@ function setupSystem() {
   ensureSheetIfMissing_(ss, 'StorageLocations', ['ID','LocationID','Location Name','Description','Status','Created Date','Updated Date']);
   ensureSheetIfMissing_(ss, 'StockIn', ['ID','StockInID','ProductID','Product Name','Quantity','Purchase Cost','Shipping Cost','Other Charges','Source','Invoice Number','Batch Number','Storage Location','Transaction Date','Created Date','Updated Date']);
   ensureSheetIfMissing_(ss, 'StockOut', ['ID','StockOutID','ProductID','Product Name','Quantity','Unit Cost','BookingID','Reason','Batch Number','Storage Location','Transaction Date','Created Date','Updated Date']);
+  ensureSheetIfMissing_(ss, 'Documents', ['ID','DocumentID','Category','FileName','MimeType','FileSize','DriveFileId','DriveUrl','BookingID','Notes','UploadedBy','Created Date']);
 
 
 
@@ -3317,7 +3318,8 @@ function deleteClientShowPermanently(token, bookingId) {
       'PaymentSchedules',
       'BookingExpenses',
       'Expenses',
-      'StockOut'
+      'StockOut',
+      'Documents'
     ].forEach(function(sheetName){
       deleteRowsByField_(sheetName, 'BookingID', bookingIdValue);
     });
@@ -4297,6 +4299,146 @@ function deleteShowExpense(token, expenseId) {
     deleteRowById_('Expenses', id);
     audit_(auth.user, 'DELETE', 'Expenses', id, expense);
     return {ok:true, message:'Expense deleted successfully.'};
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+/* =========================
+   DOCUMENTS API
+   ========================= */
+
+const DOCUMENTS_FOLDER_NAME_ = 'CUSTODIO SUPLICO FIREWORKS - Documents';
+// Keeps google.script.run round-trips (which pass the whole file as base64)
+// fast and reliable instead of timing out on very large uploads.
+const DOCUMENTS_MAX_FILE_BYTES_ = 15 * 1024 * 1024;
+
+function getDocumentsFolder_() {
+  const folders = DriveApp.getFoldersByName(DOCUMENTS_FOLDER_NAME_);
+  if (folders.hasNext()) return folders.next();
+  return DriveApp.createFolder(DOCUMENTS_FOLDER_NAME_);
+}
+
+function getDocuments(token) {
+  const auth = requireAuth_(token);
+  if (!auth.ok) return auth;
+
+  const bookingMap = new Map();
+  getOrEmpty_('Bookings').forEach(function(b){
+    const id = String(b.ID || b.BookingID || '').trim();
+    if (id) bookingMap.set(id, b);
+  });
+
+  const documents = getOrEmpty_('Documents').map(function(d){
+    const booking = bookingMap.get(String(d.BookingID || '').trim());
+    const copy = Object.assign({}, d);
+    copy.ClientName = booking ? String(booking['Client Name'] || '') : '';
+    return copy;
+  }).sort(function(a, b){ return (toDate_(b['Created Date']) || 0) - (toDate_(a['Created Date']) || 0); });
+
+  const categoryCounts = {};
+  documents.forEach(function(d){
+    const cat = String(d.Category || 'Other');
+    categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+  });
+
+  return {ok:true, documents:documents, categoryCounts:categoryCounts};
+}
+
+function uploadDocument(token, payload) {
+  const auth = requireAuth_(token);
+  if (!auth.ok) return auth;
+  payload = payload || {};
+
+  const category = String(payload.category || '').trim();
+  const fileName = String(payload.fileName || '').trim();
+  const base64Data = String(payload.base64Data || '');
+  const mimeType = String(payload.mimeType || '') || 'application/octet-stream';
+
+  if (!category) return {ok:false, message:'Category is required.'};
+  if (!fileName) return {ok:false, message:'File name is required.'};
+  if (!base64Data) return {ok:false, message:'No file data received.'};
+
+  let bytes;
+  try {
+    bytes = Utilities.base64Decode(base64Data);
+  } catch (e) {
+    return {ok:false, message:'Unable to read the uploaded file.'};
+  }
+
+  if (bytes.length > DOCUMENTS_MAX_FILE_BYTES_) {
+    return {ok:false, message:'File is too large. Please upload files under 15 MB.'};
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    if (!getSheet_('Documents')) {
+      ensureSheet_(getSpreadsheet_(), 'Documents',
+        ['ID','DocumentID','Category','FileName','MimeType','FileSize','DriveFileId','DriveUrl','BookingID','Notes','UploadedBy','Created Date']
+      );
+    }
+
+    const folder = getDocumentsFolder_();
+    const blob = Utilities.newBlob(bytes, mimeType, fileName);
+    const file = folder.createFile(blob);
+    try {
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch (e) {
+      // Domain sharing policy may block this; the file still saves fine,
+      // just without a public link until permissions are adjusted manually.
+    }
+
+    const now = new Date();
+    const id = makeId_('DOC');
+    const record = {
+      ID:id,
+      DocumentID:id,
+      Category:category,
+      FileName:fileName,
+      MimeType:mimeType,
+      FileSize:bytes.length,
+      DriveFileId:file.getId(),
+      DriveUrl:file.getUrl(),
+      BookingID:String(payload.bookingId || '').trim(),
+      Notes:String(payload.notes || ''),
+      UploadedBy:auth.user,
+      'Created Date':now
+    };
+
+    appendRow_('Documents', record);
+    audit_(auth.user, 'CREATE', 'Documents', id, {category:category, fileName:fileName});
+
+    return sanitizeForClient_({ok:true, message:'Document uploaded successfully.', document:record});
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function deleteDocument(token, documentId) {
+  const auth = requireAuth_(token);
+  if (!auth.ok) return auth;
+  const id = String(documentId || '').trim();
+  if (!id) return {ok:false, message:'Document ID is required.'};
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const doc = findRowById_('Documents', id);
+    if (!doc) return {ok:false, message:'Document not found.'};
+
+    if (doc.DriveFileId) {
+      try {
+        DriveApp.getFileById(doc.DriveFileId).setTrashed(true);
+      } catch (e) {
+        // File may already be missing/removed from Drive; still remove the record.
+      }
+    }
+
+    deleteRowById_('Documents', id);
+    audit_(auth.user, 'DELETE', 'Documents', id, doc);
+    return {ok:true, message:'Document deleted successfully.'};
   } finally {
     lock.releaseLock();
   }

@@ -439,6 +439,7 @@
     .workspace-placeholder{margin-top:14px;padding:18px;border:1px dashed #343434;border-radius:12px;color:#777;text-align:center}.calendar-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:10px}.calendar-title{font-size:18px;font-weight:800}.calendar-toolbar>span{flex:1}.calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);border:1px solid #292929;border-radius:15px;overflow:hidden;background:#0f0f0f}.calendar-head{padding:10px;text-align:center;color:#777;font-size:10px;border-bottom:1px solid #222;background:#131313}.calendar-cell{height:100px;padding:8px;border-right:1px solid #1e1e1e;border-bottom:1px solid #1e1e1e}.calendar-day{font-size:11px;color:#777}.calendar-event{margin-top:8px;padding:5px 6px;border-radius:6px;background:#1a1a1a;border-left:3px solid var(--gold);font-size:9px;color:#ddd}.gold-event{background:rgba(215,173,85,.08)}
     .form-panel{max-width:950px}.period-card{display:flex;align-items:center;gap:20px;padding:14px 16px;border:1px solid #292929;border-radius:14px;background:#111;margin-bottom:14px}.period-card label{display:flex;align-items:center;gap:10px;color:#777;font-size:11px}.period-card select{background:#0d0d0d;color:#eee;border:1px solid #292929;border-radius:8px;padding:7px}
     .document-grid,.settings-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:13px}.doc-card,.settings-card{padding:18px;border:1px solid #292929;border-radius:15px;background:#111}.doc-icon{font-size:24px;color:var(--gold2)}.doc-title,.settings-title{font-weight:700;margin-top:10px}.doc-count,.settings-sub{font-size:10px;color:#666;margin-top:4px}
+    .doc-card.clickable-row{cursor:pointer;transition:.15s}.doc-card.clickable-row:hover{border-color:#5b4a28;background:#171717}.doc-card.active{border-color:#80632b;background:rgba(215,173,85,.08)}
     .notification-list{display:grid;gap:8px}.notification-item{display:flex;align-items:flex-start;gap:12px;padding:14px;border:1px solid #292929;border-radius:14px;background:#111}.notification-dot{width:8px;height:8px;border-radius:50%;background:var(--gold);margin-top:4px}.notification-title{font-size:12px;font-weight:700}.notification-sub{font-size:10px;color:#666;margin-top:3px}.notification-time{margin-left:auto;color:#666;font-size:10px}
     .profile-card{display:flex;align-items:center;gap:18px;padding:20px;border:1px solid #2a2a2a;border-radius:16px;background:#111;max-width:550px}.avatar.large{width:64px;height:64px;font-size:22px}.profile-large{font-size:18px;font-weight:800}.placeholder-line{display:block;height:9px;width:70%;border-radius:999px;background:#1d1d1d}.placeholder-line.short{width:48%}
     @media(max-width:1050px){.split-layout{grid-template-columns:1fr}.document-grid,.settings-grid{grid-template-columns:repeat(2,1fr)}} @media(max-width:800px){.stat-strip{grid-template-columns:repeat(2,1fr)}.document-grid,.settings-grid{grid-template-columns:1fr 1fr}} @media(max-width:520px){.stat-strip{grid-template-columns:1fr}.detail-grid{grid-template-columns:1fr}.document-grid,.settings-grid{grid-template-columns:1fr}}
@@ -1332,6 +1333,9 @@
     }
     if(module==='Expenses'){
       loadExpensesModule();
+    }
+    if(module==='Documents'){
+      loadDocumentsModule();
     }
     if(module==='Notifications'){
       loadNotifications();
@@ -4129,10 +4133,195 @@
     }).deleteShowExpense(state.token,expenseId);
   }
 
+  const DOCUMENT_CATEGORIES=['Quotations','Contracts','Receipts','Proof of Payment','Permits','Client Documents','Employee Documents','Expense Receipts'];
+  let documentsData={documents:[],categoryCounts:{}};
+
   function uiDocuments(){
-    return uiHeader('Documents','Contracts, quotations, receipts, permits and files','<button class="btn gold" onclick="toast(\'Document uploads are not available in this phase yet.\')">+ Upload Document</button>')+
-      `<div class="document-grid">${['Quotations','Contracts','Receipts','Proof of Payment','Permits','Client Documents','Employee Documents','Expense Receipts'].map(x=>`<div class="doc-card"><div class="doc-icon">▤</div><div class="doc-title">${x}</div><div class="doc-count">0 files</div></div>`).join('')}</div>
-      <div class="inventory-note" style="margin-top:16px;"><strong>Note:</strong> Document storage and uploads are planned for a future phase and are not yet connected to Google Drive.</div>`;
+    return uiHeader('Documents','Contracts, quotations, receipts, permits and files','<button class="btn gold" onclick="openUploadDocumentDialog()">+ Upload Document</button>')+
+      `<div class="document-grid" id="documentsCategoryGrid">${DOCUMENT_CATEGORIES.map(x=>`<div class="doc-card clickable-row" id="docCard_${esc(x.replace(/\s+/g,'_'))}" onclick="filterDocumentsByCategory('${esc(x)}')"><div class="doc-icon">▤</div><div class="doc-title">${esc(x)}</div><div class="doc-count" id="docCount_${esc(x.replace(/\s+/g,'_'))}">0 files</div></div>`).join('')}</div>
+      <div class="panel">
+        <div class="pending-toolbar">
+          <div>
+            <div class="panel-title">All Documents</div>
+            <div class="panel-subtitle">Search by file name or client, filter by category.</div>
+          </div>
+          <div class="payments-toolbar-filters">
+            <div class="search-box"><span>⌕</span><input id="documentsSearchInput" placeholder="Search by file name or client..." oninput="filterDocumentsModule()"></div>
+            <select id="documentsCategoryFilter" class="select-pill" onchange="filterDocumentsModule()"><option value="all">All Categories</option>${DOCUMENT_CATEGORIES.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select>
+            <button class="filter-btn" type="button" onclick="clearDocumentsFilters()">Clear</button>
+          </div>
+        </div>
+      </div>
+      <div id="documentsModuleList"><div class="loading-card">Loading documents...</div></div>`;
+  }
+
+  function loadDocumentsModule(){
+    const box=document.getElementById('documentsModuleList');
+    if(!box) return;
+    box.innerHTML='<div class="loading-card">Loading documents...</div>';
+    google.script.run.withSuccessHandler(function(r){
+      if(!r||!r.ok){box.innerHTML='<div class="error-card">'+esc(r&&r.message||'Unable to load documents.')+'</div>';return;}
+      documentsData={documents:r.documents||[], categoryCounts:r.categoryCounts||{}};
+      updateDocumentsCategoryCounts();
+      renderDocumentsModule();
+    }).withFailureHandler(function(e){box.innerHTML='<div class="error-card">'+esc(e&&e.message||'Unable to load documents.')+'</div>';}).getDocuments(state.token);
+  }
+
+  function updateDocumentsCategoryCounts(){
+    DOCUMENT_CATEGORIES.forEach(function(c){
+      const key=c.replace(/\s+/g,'_');
+      const el=document.getElementById('docCount_'+key);
+      const count=documentsData.categoryCounts[c]||0;
+      if(el) el.textContent=count+' file'+(count===1?'':'s');
+    });
+  }
+
+  function filterDocumentsByCategory(category){
+    const sel=document.getElementById('documentsCategoryFilter');
+    if(sel) sel.value=category;
+    DOCUMENT_CATEGORIES.forEach(function(c){
+      const card=document.getElementById('docCard_'+c.replace(/\s+/g,'_'));
+      if(card) card.classList.toggle('active', c===category);
+    });
+    renderDocumentsModule();
+  }
+
+  function clearDocumentsFilters(){
+    const searchEl=document.getElementById('documentsSearchInput');
+    const catEl=document.getElementById('documentsCategoryFilter');
+    if(searchEl) searchEl.value='';
+    if(catEl) catEl.value='all';
+    DOCUMENT_CATEGORIES.forEach(function(c){
+      const card=document.getElementById('docCard_'+c.replace(/\s+/g,'_'));
+      if(card) card.classList.remove('active');
+    });
+    renderDocumentsModule();
+  }
+
+  function filterDocumentsModule(){
+    renderDocumentsModule();
+  }
+
+  function formatFileSize(bytes){
+    const n=Number(bytes||0);
+    if(!n) return '—';
+    if(n<1024) return n+' B';
+    if(n<1024*1024) return (n/1024).toFixed(1)+' KB';
+    return (n/(1024*1024)).toFixed(1)+' MB';
+  }
+
+  function renderDocumentsModule(){
+    const box=document.getElementById('documentsModuleList');
+    if(!box) return;
+    const searchEl=document.getElementById('documentsSearchInput');
+    const catEl=document.getElementById('documentsCategoryFilter');
+    const search=searchEl?searchEl.value.trim().toLowerCase():'';
+    const category=catEl?catEl.value:'all';
+
+    let rows=documentsData.documents||[];
+    if(category!=='all') rows=rows.filter(function(d){ return String(d.Category||'')===category; });
+    if(search) rows=rows.filter(function(d){
+      const haystack=(String(d.FileName||'')+' '+String(d.ClientName||'')).toLowerCase();
+      return haystack.indexOf(search)!==-1;
+    });
+
+    const isFiltered=!!search||category!=='all';
+    box.innerHTML=rows.length?`<div class="panel"><div class="table-wrap"><table class="data-table"><thead><tr><th>File</th><th>Category</th><th>Client / Booking</th><th>Size</th><th>Uploaded</th><th>Action</th></tr></thead><tbody>${rows.map(function(d){
+      const did=esc(d.ID||d.DocumentID||'');
+      return `<tr><td><strong>${esc(d.FileName||'—')}</strong>${d.Notes?`<br><small style="color:#777;">${esc(d.Notes)}</small>`:''}</td><td><span class="badge">${esc(d.Category||'Other')}</span></td><td>${esc(d.ClientName||d.BookingID||'—')}</td><td>${formatFileSize(d.FileSize)}</td><td>${esc(formatDate(d['Created Date']))}</td><td>${d.DriveUrl?`<a class="table-action" href="${esc(d.DriveUrl)}" target="_blank" rel="noopener">View</a>`:''}<button class="table-action danger-text" onclick="confirmDeleteDocumentModule('${did}')">Delete</button></td></tr>`;
+    }).join('')}</tbody></table></div></div>`:`<div class="panel"><div class="empty-state">${isFiltered?'No documents found for the selected filters.':'No documents uploaded yet.'}</div></div>`;
+  }
+
+  function confirmDeleteDocumentModule(documentId){
+    const d=(documentsData.documents||[]).find(function(x){ return String(x.ID||x.DocumentID||'')===String(documentId); });
+    if(!d){toast('Document not found.');return;}
+    showDialog(`<div class="dialog-card">
+      <div class="dialog-head"><div><div class="dialog-title">Delete Document?</div><div class="dialog-subtitle">This cannot be undone.</div></div><button class="dialog-close" onclick="closeDialog()">×</button></div>
+      <div class="void-warning">Deleting this document will permanently remove the file from Drive and from these records. Make sure this is intentional before continuing.</div>
+      <div class="summary-table">
+        <div><span>File Name</span><strong>${esc(d.FileName||'—')}</strong></div>
+        <div><span>Category</span><strong>${esc(d.Category||'Other')}</strong></div>
+        <div><span>Client / Booking</span><strong>${esc(d.ClientName||d.BookingID||'—')}</strong></div>
+        <div><span>Uploaded</span><strong>${esc(formatDate(d['Created Date']))}</strong></div>
+      </div>
+      <div class="dialog-actions"><span></span><button type="button" class="btn" onclick="closeDialog()">Cancel</button><button id="confirmDeleteDocumentBtn" type="button" class="btn danger" onclick="executeDeleteDocumentModule('${esc(d.ID||d.DocumentID||'')}')">Yes, Delete Document</button></div>
+    </div>`);
+  }
+
+  function executeDeleteDocumentModule(documentId){
+    const btn=document.getElementById('confirmDeleteDocumentBtn');
+    setButtonLoading(btn,true,'Deleting...');
+    google.script.run.withSuccessHandler(function(r){
+      setButtonLoading(btn,false,'Yes, Delete Document');
+      if(!r||!r.ok){toast(r&&r.message||'Unable to delete document.');return;}
+      closeDialog();
+      toast(r.message||'Document deleted.');
+      loadDocumentsModule();
+    }).withFailureHandler(function(x){
+      setButtonLoading(btn,false,'Yes, Delete Document');
+      toast(x&&x.message||'Unable to delete document.');
+    }).deleteDocument(state.token,documentId);
+  }
+
+  function openUploadDocumentDialog(presetCategory){
+    showDialog(`<div class="dialog-card">
+      <div class="dialog-head"><div><div class="dialog-title">Upload Document</div><div class="dialog-subtitle">Files are stored securely in Google Drive.</div></div><button class="dialog-close" onclick="closeDialog()">×</button></div>
+      <form onsubmit="submitUploadDocument(event)">
+        <div class="form-grid">
+          <label>Category<select id="docCategory" required>${DOCUMENT_CATEGORIES.map(c=>`<option value="${esc(c)}" ${presetCategory===c?'selected':''}>${esc(c)}</option>`).join('')}</select></label>
+          <label>Related Booking (optional)<select id="docBookingId"><option value="">No specific booking</option></select></label>
+          <label class="full-width">File<input id="docFile" type="file" required></label>
+        </div>
+        <label>Notes<textarea id="docNotes" placeholder="Optional notes about this document"></textarea></label>
+        <div class="dialog-actions"><span></span><button type="button" class="btn" onclick="closeDialog()">Cancel</button><button id="saveDocumentBtn" class="btn gold" type="submit">Upload Document</button></div>
+      </form>
+    </div>`);
+    const bookingSelect=document.getElementById('docBookingId');
+    if(bookingSelect){
+      google.script.run.withSuccessHandler(function(r){
+        if(!r||!r.ok||!document.getElementById('docBookingId')) return;
+        const bookings=(r.bookings||[]).filter(function(b){ return String(b['Booking Status']||'').toLowerCase()!=='cancelled'; });
+        bookingSelect.innerHTML='<option value="">No specific booking</option>'+bookings.map(function(b){
+          const id=esc(b.ID||b.BookingID||'');
+          return `<option value="${id}">${esc(b['Client Name']||'')} - ${esc(b['Event Name']||b['Event Type']||'')} (${id})</option>`;
+        }).join('');
+      }).getBookings(state.token);
+    }
+  }
+
+  function submitUploadDocument(e){
+    e.preventDefault();
+    const fileInput=document.getElementById('docFile');
+    const file=fileInput && fileInput.files && fileInput.files[0];
+    if(!file){showDialogError('Please choose a file to upload.');return;}
+    if(file.size>15*1024*1024){showDialogError('File is too large. Please upload files under 15 MB.');return;}
+
+    const btn=document.getElementById('saveDocumentBtn');
+    setButtonLoading(btn,true,'Uploading...');
+
+    const reader=new FileReader();
+    reader.onload=function(){
+      const base64Data=String(reader.result||'').split(',')[1]||'';
+      google.script.run.withSuccessHandler(function(r){
+        setButtonLoading(btn,false,'Upload Document');
+        if(!r||!r.ok){showDialogError(r&&r.message||'Unable to upload document.');return;}
+        closeDialog();toast(r.message||'Document uploaded.');loadDocumentsModule();
+      }).withFailureHandler(function(x){
+        setButtonLoading(btn,false,'Upload Document');showDialogError(x&&x.message||'Unable to upload document.');
+      }).uploadDocument(state.token,{
+        category:document.getElementById('docCategory').value,
+        fileName:file.name,
+        mimeType:file.type||'application/octet-stream',
+        base64Data:base64Data,
+        bookingId:document.getElementById('docBookingId').value,
+        notes:document.getElementById('docNotes').value
+      });
+    };
+    reader.onerror=function(){
+      setButtonLoading(btn,false,'Upload Document');
+      showDialogError('Unable to read the selected file.');
+    };
+    reader.readAsDataURL(file);
   }
 
   function uiReports(){
