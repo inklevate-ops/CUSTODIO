@@ -480,6 +480,10 @@
 
     .pending-client-panel{padding:16px}.pending-toolbar{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;margin-bottom:14px}.pending-badge{color:#e9b95e;background:rgba(215,173,85,.12)}
     .void-warning{padding:12px 14px;border:1px solid #6d3838;background:rgba(180,60,60,.1);color:#ff9e9e;border-radius:12px;font-size:12px;margin-bottom:14px}
+    .input-suffix{display:flex;align-items:center;background:#0c0c0c;border:1px solid #2a2a2a;border-radius:10px;padding:0 11px}
+    .input-suffix input{border:0!important;background:transparent!important;padding:10px 0!important;flex:1 1 auto;min-width:0;color:#eee!important;outline:none!important;box-shadow:none!important}
+    .input-suffix span{color:#888;font-size:12px;font-weight:700;flex:0 0 auto;padding-left:6px}
+    .input-suffix:focus-within{border-color:#80632b;box-shadow:0 0 0 3px rgba(214,173,85,.07)}
     .select-pill{background:#0d0d0d;color:#eee;border:1px solid #2b2b2b;border-radius:9px;padding:9px 11px;font-size:11px;outline:none;color-scheme:dark}.select-pill:focus{border-color:#80632b}
     .payments-toolbar-filters{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
     @media(max-width:700px){.pending-toolbar .payments-toolbar-filters{width:100%}.payments-toolbar-filters .search-box{width:100%}}
@@ -1161,6 +1165,11 @@
       style:'currency',
       currency:'PHP'
     }).format(n);
+  }
+
+  function pct(value){
+    const n = Number(value || 0);
+    return (Number.isInteger(n) ? n : Math.round(n * 100) / 100) + '%';
   }
 
   function renderUpcoming(rows){
@@ -4618,6 +4627,7 @@
               <tr>
                 <th>Borrowed From</th>
                 <th>Loan Amount</th>
+                <th>Loan %</th>
                 <th>Paid</th>
                 <th>Outstanding</th>
                 <th>Date Borrowed</th>
@@ -4631,6 +4641,7 @@
                 <tr>
                   <td><strong>${esc(l.Lender)}</strong></td>
                   <td>${money(l['Loan Amount'])}</td>
+                  <td>${pct(l['Loan Percentage'])}</td>
                   <td>${money(l['Amount Paid'])}</td>
                   <td><span class="badge ${Number(l['Outstanding Balance']||0)>0?'danger-badge':''}">${money(l['Outstanding Balance'])}</span></td>
                   <td>${esc(formatDate(l['Date Borrowed']))}</td>
@@ -4641,7 +4652,7 @@
                     <button class="table-action danger-text" onclick="confirmDeleteLoanModule('${esc(l.ID||l.LoanID||'')}')">Delete</button>
                   </td>
                 </tr>
-              `).join('') : `<tr><td colspan="8"><div class="empty-state">${isFiltered?'No loans found for the selected filters.':'No loans recorded.'}</div></td></tr>`}
+              `).join('') : `<tr><td colspan="9"><div class="empty-state">${isFiltered?'No loans found for the selected filters.':'No loans recorded.'}</div></td></tr>`}
             </tbody>
           </table>
         </div>
@@ -4658,6 +4669,7 @@
       <div class="summary-table">
         <div><span>Borrowed From</span><strong>${esc(l.Lender||'—')}</strong></div>
         <div><span>Loan Amount</span><strong>${money(l['Loan Amount']||0)}</strong></div>
+        <div><span>Loan %</span><strong>${pct(l['Loan Percentage'])}</strong></div>
         <div><span>Paid</span><strong>${money(l['Amount Paid']||0)}</strong></div>
         <div><span>Outstanding</span><strong>${money(l['Outstanding Balance']||0)}</strong></div>
       </div>
@@ -4694,6 +4706,7 @@
           <div class="form-grid">
             <label>Borrowed From<input id="loanLender" required placeholder="Person / company"></label>
             <label>Loan Amount<input id="loanAmount" type="number" min="0.01" step="0.01" required></label>
+            <label>Loan Percentage<div class="input-suffix"><input id="loanPercentage" type="number" min="0" max="100" step="0.01" value="0" placeholder="0"><span>%</span></div></label>
             <label>Amount Already Paid<input id="loanAmountPaid" type="number" min="0" step="0.01" value="0"></label>
             <label>Date Borrowed<input id="loanDateBorrowed" type="date"></label>
             <label>Due Date<input id="loanDueDate" type="date"></label>
@@ -4722,6 +4735,7 @@
     }).saveLoan(state.token,{
       lender:document.getElementById('loanLender').value,
       amount:document.getElementById('loanAmount').value,
+      percentage:document.getElementById('loanPercentage').value,
       amountPaid:document.getElementById('loanAmountPaid').value,
       dateBorrowed:document.getElementById('loanDateBorrowed').value,
       dueDate:document.getElementById('loanDueDate').value,

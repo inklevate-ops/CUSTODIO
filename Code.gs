@@ -59,7 +59,7 @@ function setupSystem() {
   ensureSheetIfMissing_(ss, 'PaymentSchedules', ['ID','ScheduleID','BookingID','Milestone','Due Date','Amount','Paid','Balance','Status','Created Date','Updated Date']);
   ensureSheetIfMissing_(ss, 'AuditLog', ['ID','User','Action','Module','Record ID','Timestamp','Details']);
   ensureSheetIfMissing_(ss, 'Clients', ['ID','ClientID','Name','Phone','Email','Address','Notes','Status','Created Date','Updated Date']);
-  ensureSheetIfMissing_(ss, 'Loans', ['ID','LoanID','Lender','Loan Amount','Amount Paid','Outstanding Balance','Date Borrowed','Due Date','Purpose','Notes','Created Date','Updated Date']);
+  ensureSheetIfMissing_(ss, 'Loans', ['ID','LoanID','Lender','Loan Amount','Loan Percentage','Amount Paid','Outstanding Balance','Date Borrowed','Due Date','Purpose','Notes','Created Date','Updated Date']);
   ensureSheetIfMissing_(ss, 'Bookings', ['ID','BookingID','ClientID','Client Name','Contact Information','Event Type','Event Name','Event Date','Event Time','Location','Subtotal','Discount Type','Discount Value','Discount Amount','Discount','Additional Charges','Tax Rate','Tax','Final Amount','Total Amount Due','DownPayment','Down Payment','Paid Amount','Balance','Payment Status','Booking Status','Archived','Notes','Created Date','Updated Date']);
   ensureSheetIfMissing_(ss, 'Products', ['ID','ProductID','Name','Source','Category','Unit','Purchase Cost','Selling Cost','Unit Cost','Selling Price','Minimum Stock','Status','Description','Created Date','Updated Date']);
   ensureColumnIfMissing_(ss.getSheetByName('Products'), 'Selling Cost');
@@ -750,6 +750,7 @@ function getLoans(token) {
     const paid = number_(l['Amount Paid']);
     return Object.assign({}, l, {
       'Loan Amount': amount,
+      'Loan Percentage': number_(l['Loan Percentage']),
       'Amount Paid': paid,
       'Outstanding Balance': Math.max(0, amount - paid)
     });
@@ -765,6 +766,7 @@ function saveLoan(token, payload) {
   const lender = String(payload.lender || '').trim();
   const amount = number_(payload.amount);
   const dateBorrowed = payload.dateBorrowed ? new Date(payload.dateBorrowed) : new Date();
+  const percentage = Math.max(0, number_(payload.percentage));
 
   if (!lender) return {ok:false, message:'Lender / source of loan is required.'};
   if (amount <= 0) return {ok:false, message:'Loan amount must be greater than zero.'};
@@ -780,6 +782,7 @@ function saveLoan(token, payload) {
     LoanID:id,
     Lender:lender,
     'Loan Amount':amount,
+    'Loan Percentage':percentage,
     'Amount Paid':paid,
     'Outstanding Balance':Math.max(0, amount - paid),
     'Date Borrowed':dateBorrowed,
@@ -795,7 +798,7 @@ function saveLoan(token, payload) {
   try {
     if (!getSheet_('Loans')) {
       ensureSheet_(getSpreadsheet_(), 'Loans',
-        ['ID','LoanID','Lender','Loan Amount','Amount Paid','Outstanding Balance','Date Borrowed','Due Date','Purpose','Notes','Created Date','Updated Date']
+        ['ID','LoanID','Lender','Loan Amount','Loan Percentage','Amount Paid','Outstanding Balance','Date Borrowed','Due Date','Purpose','Notes','Created Date','Updated Date']
       );
     }
     upsertRow_('Loans', record);
