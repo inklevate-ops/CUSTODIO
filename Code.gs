@@ -4313,11 +4313,33 @@ const DOCUMENTS_FOLDER_NAME_ = 'CUSTODIO SUPLICO FIREWORKS - Documents';
 // Keeps google.script.run round-trips (which pass the whole file as base64)
 // fast and reliable instead of timing out on very large uploads.
 const DOCUMENTS_MAX_FILE_BYTES_ = 15 * 1024 * 1024;
+const DOCUMENTS_FOLDER_ID_PROPERTY_ = 'DOCUMENTS_FOLDER_ID';
 
+/**
+ * Remembers the Documents folder's ID in Script Properties instead of
+ * searching Drive by name (DriveApp.getFoldersByName). Looking a file/folder
+ * up by an ID this script itself created falls under the narrower, safer
+ * "drive.file" OAuth scope, while searching Drive by name requires the much
+ * broader "drive" scope (full read/write access to the user's entire
+ * Drive) - unnecessary here and a bigger permission ask than this feature
+ * needs.
+ */
 function getDocumentsFolder_() {
-  const folders = DriveApp.getFoldersByName(DOCUMENTS_FOLDER_NAME_);
-  if (folders.hasNext()) return folders.next();
-  return DriveApp.createFolder(DOCUMENTS_FOLDER_NAME_);
+  const props = PropertiesService.getScriptProperties();
+  const savedId = props.getProperty(DOCUMENTS_FOLDER_ID_PROPERTY_);
+
+  if (savedId) {
+    try {
+      const folder = DriveApp.getFolderById(savedId);
+      if (folder) return folder;
+    } catch (e) {
+      // Folder was deleted/moved outside the app; fall through and recreate it.
+    }
+  }
+
+  const folder = DriveApp.createFolder(DOCUMENTS_FOLDER_NAME_);
+  props.setProperty(DOCUMENTS_FOLDER_ID_PROPERTY_, folder.getId());
+  return folder;
 }
 
 function getDocuments(token) {
