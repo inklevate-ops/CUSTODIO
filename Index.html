@@ -4326,7 +4326,7 @@
 
   function uiReports(){
     return uiHeader('Reports','Sales, bookings, payments, inventory, expenses, payroll and profit',
-      '<div class="table-actions"><button class="btn" onclick="printCurrentReport()">Print</button><button class="btn" onclick="exportCurrentReportCSV()">Export CSV</button><button class="btn" onclick="loadReports(currentReportTab)">Refresh</button></div>')+
+      '<div class="table-actions"><button class="btn" onclick="printCurrentReport()">Print</button><button class="btn" onclick="loadReports(currentReportTab)">Refresh</button></div>')+
       `<div class="report-tabs">
         <button class="filter-btn active" id="reportTab_sales" onclick="setReportTab('sales')">Sales</button>
         <button class="filter-btn" id="reportTab_bookings" onclick="setReportTab('bookings')">Bookings</button>
@@ -4340,7 +4340,7 @@
         <div class="pending-toolbar">
           <div>
             <div class="panel-title">Date Filter</div>
-            <div class="panel-subtitle">Scopes the table, totals, export and print to the selected period.</div>
+            <div class="panel-subtitle">Scopes the table, totals and print to the selected period.</div>
           </div>
           <div class="payments-toolbar-filters">
             <button class="filter-btn active" id="reportsDate_all" onclick="setReportsDateFilter('all')">All Time</button>
@@ -4629,30 +4629,6 @@
           <div class="profit-total"><span>Net Profit</span><strong>${money(m.netProfit||0)}</strong></div>
         </div>
       </div>`;
-  }
-
-  function exportCurrentReportCSV(){
-    const {title, headers, rows}=currentReportExport;
-    if(!rows||!rows.length){toast('No data to export for this report.');return;}
-    const lines=[headers.join(',')];
-    rows.forEach(function(row){
-      const cells=row.map(function(v){
-        const s=String(v==null?'':v).replace(/"/g,'""');
-        return /[",\n]/.test(s) ? '"'+s+'"' : s;
-      });
-      lines.push(cells.join(','));
-    });
-    const csv=lines.join('\n');
-    const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url;
-    a.download=(title||'report').toLowerCase().replace(/\s+/g,'-')+'-'+new Date().toISOString().slice(0,10)+'.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(function(){ URL.revokeObjectURL(url); },1000);
-    toast('Report exported to CSV.');
   }
 
   function printCurrentReport(){
