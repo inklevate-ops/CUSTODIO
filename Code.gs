@@ -2480,6 +2480,82 @@ function recalculateBookingAmountFromProductUsage_(bookingId) {
 function saveShowUsage(token, payload) {
   const auth = requireAuth_(token);
   if (!auth.ok) return auth;
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    return saveShowUsageOne_(auth, payload || {}, false);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Saves several product/material usages in a single request. Adding products
+ * one at a time (one google.script.run call per product) meant every extra
+ * product paid for its own full network round-trip AND its own booking-total
+ * recalculation. Batching them into one call means only one round-trip and
+ * one final recalculation for the whole batch.
+ */
+function saveShowUsageBatch(token, items) {
+  const auth = requireAuth_(token);
+  if (!auth.ok) return auth;
+
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return {ok:false, message:'No items to save.'};
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+
+  try {
+    const saved = [];
+    let bookingId = '';
+    let recalcNeeded = false;
+
+    for (let i = 0; i < list.length; i++) {
+      const payload = list[i] || {};
+      bookingId = String(payload.bookingId || bookingId);
+      const result = saveShowUsageOne_(auth, payload, true);
+
+      if (!result.ok) {
+        // Earlier items in this batch already wrote successfully - recalculate
+        // the booking total for what did save before reporting the failure.
+        if (saved.length && bookingId) recalculateBookingAmountFromProductUsage_(bookingId);
+        return sanitizeForClient_({
+          ok:false,
+          message: result.message ||
+            ('Unable to save ' + (payload.itemId || 'an item') + '.'),
+          savedCount: saved.length
+        });
+      }
+
+      saved.push(result);
+      if (String(payload.usageType || '') === 'Product') recalcNeeded = true;
+    }
+
+    const bookingTotals = recalcNeeded && bookingId
+      ? recalculateBookingAmountFromProductUsage_(bookingId)
+      : null;
+
+    return sanitizeForClient_({
+      ok:true,
+      message: saved.length + ' item' + (saved.length === 1 ? '' : 's') + ' saved successfully.',
+      results: saved,
+      bookingTotals: bookingTotals
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Core logic shared by saveShowUsage() and saveShowUsageBatch(). Does not
+ * acquire its own lock - callers must already hold the script lock.
+ * skipRecalc lets a batch caller defer the booking-total recalculation
+ * (which rescans BookingUsage/Products/Payments and crew pay) until after
+ * every item in the batch has been written, instead of once per item.
+ */
+function saveShowUsageOne_(auth, payload, skipRecalc) {
   payload = payload || {};
 
   const bookingId = String(payload.bookingId || '').trim();
@@ -2494,10 +2570,7 @@ function saveShowUsage(token, payload) {
   if (!itemId) return {ok:false, message:'Select an item.'};
   if (quantity <= 0) return {ok:false, message:'Quantity must be greater than zero.'};
 
-  const lock = LockService.getScriptLock();
-  lock.waitLock(20000);
-
-  try {
+  {
     const booking = findRowById_('Bookings', bookingId);
     if (!booking) return {ok:false, message:'Booking / show not found.'};
 
@@ -2620,7 +2693,9 @@ function saveShowUsage(token, payload) {
       upsertRow_('Inventory', currentInv);
     }
 
-    const bookingTotals = usageType === 'Product' ? recalculateBookingAmountFromProductUsage_(bookingId) : null;
+    const bookingTotals = (!skipRecalc && usageType === 'Product')
+      ? recalculateBookingAmountFromProductUsage_(bookingId)
+      : null;
 
     audit_(auth.user, 'SHOW_USAGE', usageType, usageId, {
       bookingId:bookingId,
@@ -2652,8 +2727,6 @@ function saveShowUsage(token, payload) {
       },
       bookingTotals:bookingTotals
     };
-  } finally {
-    lock.releaseLock();
   }
 }
 

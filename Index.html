@@ -2542,32 +2542,27 @@
       };
     });
 
-    function saveNext(index){
-      if(index>=queue.length){
-        setButtonLoading(b,false,'Save Product Usage');
-        window.selectedProductUsageItems=[];
-        closeDialog();
-        toast('Product usage saved successfully.');
-
-        // Refresh the Product workspace after saving, but do not reopen
-        // the Add Products dialog.
-        loadShowUsage('products',true);
+    // Save every selected product in a single request instead of one
+    // google.script.run call per product - each extra product used to add
+    // its own full network round-trip, which made adding several products
+    // at once noticeably slower than adding just one.
+    google.script.run.withSuccessHandler(function(r){
+      setButtonLoading(b,false,'Save Product Usage');
+      if(!r||!r.ok){
+        showDialogError(r&&r.message||'Unable to save product usage.');
         return;
       }
-      google.script.run.withSuccessHandler(function(r){
-        if(!r||!r.ok){
-          setButtonLoading(b,false,'Save Product Usage');
-          showDialogError(r&&r.message||'Unable to save product usage.');
-          return;
-        }
-        saveNext(index+1);
-      }).withFailureHandler(function(x){
-        setButtonLoading(b,false,'Save Product Usage');
-        showDialogError(x&&x.message||'Unable to save product usage.');
-      }).saveShowUsage(state.token,queue[index]);
-    }
+      window.selectedProductUsageItems=[];
+      closeDialog();
+      toast(r.message||'Product usage saved successfully.');
 
-    saveNext(0);
+      // Refresh the Product workspace after saving, but do not reopen
+      // the Add Products dialog.
+      loadShowUsage('products',true);
+    }).withFailureHandler(function(x){
+      setButtonLoading(b,false,'Save Product Usage');
+      showDialogError(x&&x.message||'Unable to save product usage.');
+    }).saveShowUsageBatch(state.token,queue);
   }
 
   function openQuickMaterialDialog(){
