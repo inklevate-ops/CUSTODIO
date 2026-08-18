@@ -2895,11 +2895,17 @@
     const rows=data.payments||[];
     const paid=Number(b['Paid Amount']||b['Down Payment']||b.DownPayment||0);
     const balance=Number(b.Balance||0);
+    // Status reflects whether the show is fully paid yet, not each individual
+    // transaction (every payment received is already "completed" by
+    // definition) - Pending while there's still a balance, Paid once settled.
+    const statusBadge=balance<=0.01
+      ? '<span class="badge">Paid</span>'
+      : '<span class="status-badge pending-badge">Pending</span>';
     return `<div class="workspace-section-card">
       <div class="section-card-head"><div><div class="section-card-title">Payments</div><div class="section-card-sub">Payments are automatically linked to this Client/Show.</div></div><button class="btn gold small" onclick="openShowPaymentDialog()">+ Payment</button></div>
       <div class="summary-table"><div><span>Final Amount</span><strong>${money(b['Final Amount']||b['Total Amount Due']||((Number(b.Subtotal||0)-Number(b.Discount||b['Discount Amount']||0)) + (Number(b.Subtotal||0)>0 ? Math.max(0,Number(b.Subtotal||0)-Number(b.Discount||b['Discount Amount']||0))*0.05 : 0)))}</strong></div><div><span>Amount Paid</span><strong>${money(paid)}</strong></div><div><span>Balance</span><strong>${money(balance)}</strong></div><div><span>Tax</span><strong>${money(b.Tax||0)}</strong></div></div>
       <div class="table-wrap" style="margin-top:16px"><table class="data-table"><thead><tr><th>Date</th><th>Milestone</th><th>Amount</th><th>Method</th><th>Status</th><th></th></tr></thead><tbody>
-      ${rows.length ? rows.map(p=>`<tr><td>${esc(formatDate(p['Payment Date']))}</td><td>${esc(p.Milestone||'Payment')}</td><td>${money(p.Amount||0)}</td><td>${esc(p.Method||'')}</td><td><span class="badge">${esc(p.Status||'Completed')}</span></td><td><button class="table-action danger" onclick="deleteShowPaymentUI('${esc(p.ID||p.PaymentID||'')}')">Delete</button></td></tr>`).join('') : `<tr><td colspan="6"><div class="empty-state">No payments recorded for this show.</div></td></tr>`}
+      ${rows.length ? rows.map(p=>`<tr><td>${esc(formatDate(p['Payment Date']))}</td><td>${esc(p.Milestone||'Payment')}</td><td>${money(p.Amount||0)}</td><td>${esc(p.Method||'')}</td><td>${statusBadge}</td><td><button class="table-action danger" onclick="deleteShowPaymentUI('${esc(p.ID||p.PaymentID||'')}')">Delete</button></td></tr>`).join('') : `<tr><td colspan="6"><div class="empty-state">No payments recorded for this show.</div></td></tr>`}
       </tbody></table></div>
     </div>`;
   }
