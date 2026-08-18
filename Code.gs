@@ -299,6 +299,12 @@ function getDashboard(token) {
     if (bId) bookingMapForPayroll.set(bId, b);
   });
 
+  const employeeTypeById = new Map();
+  getOrEmpty_('Employees').forEach(e => {
+    const id = String(e.ID || e.EmployeeID || '').trim();
+    if (id) employeeTypeById.set(id, String(e['Employee Type'] || 'Regular'));
+  });
+
   const monthlyPayroll = getOrEmpty_('BookingCrew').reduce((sum, c) => {
     const crewBooking = bookingMapForPayroll.get(String(c.BookingID || '').trim());
     if (!crewBooking) return sum;
@@ -318,7 +324,12 @@ function getDashboard(token) {
     );
     const manualPay = number_(c.Pay ?? c['Show Pay'] ?? 0);
     const configuredRate = number_(c['Pay Rate'] ?? 5) || 5;
-    const pay = crewShowTotal > 60000 ? crewShowTotal * configuredRate / 100 : manualPay;
+    // Owner and Head Tech pay is always manual, matching the same exemption
+    // applied in assignEmployeeToShow/getPayrollSummary, so this Dashboard
+    // figure stays consistent with the Payroll module's Gross Pay total.
+    const employeeType = employeeTypeById.get(String(c.EmployeeID || '').trim()) || 'Regular';
+    const isExemptFromPercentagePay = employeeType === 'Owner' || employeeType === 'Head Tech';
+    const pay = (crewShowTotal > 60000 && !isExemptFromPercentagePay) ? crewShowTotal * configuredRate / 100 : manualPay;
     return sum + pay;
   }, 0);
 
