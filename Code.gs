@@ -264,21 +264,22 @@ function getDashboard(token) {
     'yyyy-MM'
   );
 
+  // Total Sales counts every active booking regardless of its event date (it
+  // is a lifetime figure, not scoped to the current month). Expenses and
+  // Payroll used to only count records dated in the current calendar month,
+  // which - since an expense's date is automatically tied to its show's
+  // event date (often weeks or months in the future) - meant they almost
+  // never matched anything yet, making Net Profit effectively equal to
+  // Total Sales with real costs missing. Expenses and Payroll are now
+  // lifetime totals too, so all three figures share the same scope and
+  // Net Profit is meaningful.
   const monthlyExpenses = expenses.reduce((sum, e) => {
     const bookingId = String(e.BookingID || '').trim();
-    const d = toDate_(e.Date);
     if (bookingId && !activeBookingIds.has(bookingId)) return sum;
-    return d && Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM') === monthKey
-      ? sum + number_(e.Amount)
-      : sum;
+    return sum + number_(e.Amount);
   }, 0);
 
-  const monthlyPayroll = payroll.reduce((sum, p) => {
-    const d = toDate_(p['Payment Date']);
-    return d && Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM') === monthKey
-      ? sum + number_(p['Net Salary'])
-      : sum;
-  }, 0);
+  const monthlyPayroll = payroll.reduce((sum, p) => sum + number_(p['Net Salary']), 0);
 
   // Count unique clients with at least one non-cancelled booking.
   // Multiple active shows for the same client count as one client.

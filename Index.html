@@ -990,8 +990,8 @@
         ${metricCard('Outstanding',money(m.outstandingBalance))}
         ${metricCard('Inventory Value',money(m.inventoryValue))}
         ${metricCard('Low Stock',m.lowStockItems||0)}
-        ${metricCard('Monthly Expenses',money(m.monthlyExpenses))}
-        ${metricCard('Payroll',money(m.monthlyPayroll))}
+        ${metricCard('Total Expenses',money(m.monthlyExpenses))}
+        ${metricCard('Total Payroll',money(m.monthlyPayroll))}
         ${metricCard('Net Profit',money(m.netProfit))}
       </div>
 
@@ -4011,16 +4011,16 @@
         panel.innerHTML=`
           <div class="stat-strip">
             ${uiStat('Total Sales',money(m.totalSales||0))}
-            ${uiStat('Monthly Expenses',money(m.monthlyExpenses||0))}
-            ${uiStat('Monthly Payroll',money(m.monthlyPayroll||0))}
+            ${uiStat('Total Expenses',money(m.monthlyExpenses||0))}
+            ${uiStat('Total Payroll',money(m.monthlyPayroll||0))}
             ${uiStat('Net Profit',money(m.netProfit||0))}
           </div>
           <div class="panel">
             <div class="panel-head"><div><div class="panel-title">Profit Summary</div><div class="panel-subtitle">Total sales minus monthly expenses and payroll.</div></div></div>
             <div class="profit-breakdown">
               ${profitLineUI('Total Sales',m.totalSales||0)}
-              ${profitLineUI('Monthly Expenses',-(m.monthlyExpenses||0))}
-              ${profitLineUI('Monthly Payroll',-(m.monthlyPayroll||0))}
+              ${profitLineUI('Total Expenses',-(m.monthlyExpenses||0))}
+              ${profitLineUI('Total Payroll',-(m.monthlyPayroll||0))}
               <div class="profit-total"><span>Net Profit</span><strong>${money(m.netProfit||0)}</strong></div>
             </div>
           </div>`;
