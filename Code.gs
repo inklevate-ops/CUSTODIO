@@ -4004,6 +4004,88 @@ function getAllPayments(token) {
 }
 
 /**
+ * Everything the upgraded Payments module needs in a single round-trip:
+ * payments enriched with their booking/client context, the list of bookings
+ * that still have an outstanding balance, and pre-computed summary/method
+ * breakdown totals. Bundling this avoids the module firing 3-4 separate
+ * google.script.run calls (and the associated multi-second Apps Script
+ * cold-start overhead per call) every time it loads or refreshes.
+ */
+function getPaymentsOverview(token) {
+  const auth = requireAuth_(token);
+  if (!auth.ok) return auth;
+
+  const payments = getOrEmpty_('Payments');
+  const bookings = getOrEmpty_('Bookings');
+
+  const bookingMap = new Map();
+  bookings.forEach(function(b){
+    const id = String(b.ID || b.BookingID || '').trim();
+    if (id) bookingMap.set(id, b);
+  });
+
+  const enrichedPayments = payments.map(function(p){
+    const bookingId = String(p.BookingID || '').trim();
+    const booking = bookingMap.get(bookingId);
+    const copy = Object.assign({}, p);
+    copy.ClientName = booking ? String(booking['Client Name'] || '') : '';
+    copy.EventName = booking ? String(booking['Event Name'] || booking['Event Type'] || '') : '';
+    copy.EventDate = booking ? booking['Event Date'] : '';
+    copy.BookingStatus = booking ? String(booking['Booking Status'] || '') : '';
+    copy.BookingFinalAmount = booking ? number_(booking['Final Amount'] ?? booking['Total Amount Due'] ?? booking['Total Amount']) : 0;
+    copy.BookingBalance = booking ? number_(booking.Balance ?? booking['Outstanding Balance']) : 0;
+    copy.BookingPaymentStatus = booking ? String(booking['Payment Status'] || '') : '';
+    return copy;
+  }).sort(function(a, b){ return (toDate_(b['Payment Date']) || 0) - (toDate_(a['Payment Date']) || 0); });
+
+  const bookingsOutstanding = bookings
+    .filter(function(b){ return String(b['Booking Status'] || '').trim().toLowerCase() !== 'cancelled'; })
+    .map(function(b){
+      const finalAmount = number_(b['Final Amount'] ?? b['Total Amount Due'] ?? b['Total Amount']);
+      const paid = number_(b['Paid Amount'] ?? b['Down Payment'] ?? b.DownPayment);
+      const balance = number_(b.Balance ?? Math.max(0, finalAmount - paid));
+      return {
+        BookingID:String(b.ID || b.BookingID || '').trim(),
+        ClientName:String(b['Client Name'] || ''),
+        EventName:String(b['Event Name'] || b['Event Type'] || ''),
+        EventDate:b['Event Date'] || '',
+        FinalAmount:finalAmount,
+        Paid:paid,
+        Balance:balance,
+        PaymentStatus:String(b['Payment Status'] || ''),
+        BookingStatus:String(b['Booking Status'] || '')
+      };
+    })
+    .filter(function(b){ return b.Balance > 0.01; })
+    .sort(function(a, b){ return b.Balance - a.Balance; });
+
+  const totalCollected = payments.reduce(function(sum, p){ return sum + number_(p.Amount); }, 0);
+  const totalOutstanding = bookingsOutstanding.reduce(function(sum, b){ return sum + b.Balance; }, 0);
+
+  const methodTotals = new Map();
+  payments.forEach(function(p){
+    const method = String(p.Method || 'Unspecified').trim() || 'Unspecified';
+    const entry = methodTotals.get(method) || {method:method, count:0, amount:0};
+    entry.count += 1;
+    entry.amount += number_(p.Amount);
+    methodTotals.set(method, entry);
+  });
+  const methodBreakdown = Array.from(methodTotals.values()).sort(function(a, b){ return b.amount - a.amount; });
+
+  return sanitizeForClient_({
+    ok:true,
+    payments:enrichedPayments,
+    bookingsOutstanding:bookingsOutstanding,
+    summary:{
+      totalCollected:totalCollected,
+      totalOutstanding:totalOutstanding,
+      totalTransactions:payments.length,
+      methodBreakdown:methodBreakdown
+    }
+  });
+}
+
+/**
  * knownBooking / knownPaidTotal let a caller that already has the booking
  * row and/or already computed the new payment total (saveBookingPayment
  * does both while validating the payment) skip re-reading the Bookings and
