@@ -3704,20 +3704,28 @@
     <div id="payrollPanel"><div class="loading-card">Loading payroll...</div></div>`;
   }
 
+  let payrollLoadToken=0;
+
   function loadPayroll(){
     const panel=document.getElementById('payrollPanel');
     const period=document.getElementById('payrollPeriod')?.value || new Date().toISOString().slice(0,7);
     if(panel) panel.innerHTML='<div class="loading-card">Loading payroll...</div>';
 
+    // If a slow/overlapping request finishes after a newer one already
+    // rendered, ignore it - otherwise stale data (e.g. from before a payroll
+    // record was processed) can overwrite the up-to-date table.
+    const requestToken=++payrollLoadToken;
+
     let finished=false;
     const timeoutId=setTimeout(function(){
-      if(finished) return;
+      if(finished || requestToken!==payrollLoadToken) return;
       if(panel) panel.innerHTML='<div class="error-card">Payroll is taking too long to load. Please refresh and try again.</div>';
     },15000);
 
     google.script.run
       .withSuccessHandler(function(r){
         finished=true; clearTimeout(timeoutId);
+        if(requestToken!==payrollLoadToken) return;
         if(!r||!r.ok){
           if(panel) panel.innerHTML='<div class="error-card">'+esc(r&&r.message||'Unable to load payroll.')+'</div>';
           return;
@@ -3793,6 +3801,7 @@
       })
       .withFailureHandler(function(e){
         finished=true; clearTimeout(timeoutId);
+        if(requestToken!==payrollLoadToken) return;
         if(panel) panel.innerHTML='<div class="error-card">'+esc(e&&e.message||'Unable to load payroll.')+'</div>';
       })
       .getPayrollSummary(state.token,period);
